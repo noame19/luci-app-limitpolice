@@ -45,7 +45,12 @@ STATS_STATE_FILE="/var/run/limitpolice.stats"
 # init.d does the same so reload+daemon can never race.
 LOCK_FILE="/var/run/limitpolice/.lock"
 
-. /etc/functions.sh
+# /etc/functions.sh is sourced by /etc/rc.common (which this script's
+# `#!/bin/sh /etc/rc.common` shebang pulls in). Older revisions of
+# this script had an explicit `. /etc/functions.sh` here, but modern
+# OpenWrt / ImmortalWrt moved functions.sh to /lib/functions.sh and
+# rc.common sources it for us. Re-source here would fail on every
+# modern build (no /etc/functions.sh symlink).
 
 log_msg() {
     local level="$1"; shift
