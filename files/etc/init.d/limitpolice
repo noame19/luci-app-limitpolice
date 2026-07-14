@@ -1,0 +1,241 @@
+#!/bin/sh /etc/rc.common
+# luci-app-limitpolice - per-device ingress bandwidth policing
+# Compatible with Flow Offloading / fullcon NAT / BBR.
+# Uses sch_ingress + act_police + cls_u32 (or cls_flower).
+#
+# Rule schema (UCI):
+#   config rule
+#       option enabled  '1'
+#       option interface 'br-lan'             # iface name (br-lan, eth0, ...)
+#       option target   '192.168.1.100/32'   # CIDR or single IP or MAC (xx:xx:xx:xx:xx:xx)
+#       option target_type 'ip'              # ip | mac
+#       option direction 'dst'               # dst (downlink to device) | src (uplink from device)
+#       option rate '10'                     # numeric
+#       option unit  'Mbps'                  # Kbps | Mbps | KB/s | MB/s
+#       option comment 'iphone'              # free text
+
+START=90
+STOP=10
+USE_PROCD=0
+
+LOG_PREFIX="limitpolice"
+PRIO_BASE=100   # filter priority base; our rules live in 100..199
+PRIO_MAX=199
+STATE_FILE="/var/run/limitpolice.filters"
+QDISC_STATE_FILE="/var/run/limitpolice.qdiscs"
+
+. /etc/functions.sh
+
+log_msg() {
+    local level="$1"; shift
+    logger -t "$LOG_PREFIX" -p "daemon.$level" "$*"
+}
+
+# load kernel modules required by tc police
+load_modules() {
+    local need_reload=0
+    for m in sch_ingress act_police cls_u32 cls_flower; do
+        if ! grep -q "^$m " /proc/modules 2>/dev/null; then
+            if /sbin/modprobe "$m" 2>/dev/null; then
+                log_msg info "loaded $m"
+            else
+                # cls_flower is optional; others are mandatory
+                [ "$m" = "cls_flower" ] || log_msg warn "cannot load $m (built-in?)"
+            fi
+        fi
+    done
+}
+
+# convert user-facing unit to kbit (integer)
+unit_to_kbit() {
+    local rate="$1" unit="$2"
+    case "$unit" in
+        Kbps|kbps|KBps)  echo $(( rate * 1 )) ;;
+        Mbps|Mbps)        echo $(( rate * 1000 )) ;;
+        KBps|KBps)        echo $(( rate * 8 )) ;;
+        MBps|MBps)        echo $(( rate * 8000 )) ;;
+        *)                echo $(( rate * 1000 )) ;;   # default: Mbps
+    esac
+}
+
+# burst size heuristic (in kbit).  Keep ≥ 32k to absorb typical ACK bursts.
+compute_burst() {
+    local kbit="$1"
+    local b=$(( kbit / 8 ))
+    [ "$b" -lt 32 ] && b=32
+    echo $(( b * 8 ))   # express in kbit as tc expects
+}
+
+# build one tc filter command line into $cmd; returns 0 on success
+build_filter_cmd() {
+    local cmd_var="$1" rule_name="$2" prio="$3" iface="$4"
+    local target target_type direction rate unit comment enabled
+    config_get_bool enabled "$rule_name" enabled 1
+    [ "$enabled" = "1" ] || return 1
+    config_get target      "$rule_name" target      ""
+    config_get target_type "$rule_name" target_type "ip"
+    config_get direction   "$rule_name" direction   "dst"
+    config_get rate        "$rule_name" rate        ""
+    config_get unit        "$rule_name" unit        "Mbps"
+    [ -z "$target" ] && return 1
+    [ -z "$rate" ]   && return 1
+
+    local kbit=$(unit_to_kbit "$rate" "$unit")
+    local burst=$(compute_burst "$kbit")
+    local match=""
+    local proto="ip"
+
+    if [ "$target_type" = "mac" ]; then
+        # u32 match on Ethernet header. Format match pattern derived from
+        # eqosplus pattern: 6 bytes of MAC at offsets -2..-14 in the ethernet frame.
+        local M0=$(echo "$target" | awk -F: '{printf "%s%s", $1, $2}')
+        local M1=$(echo "$target" | awk -F: '{printf "%s%s", $3, $4}')
+        local M2=$(echo "$target" | awk -F: '{printf "%s%s", $5, $6}')
+        if [ "$direction" = "src" ]; then
+            # src MAC: bytes 6..11 → offsets -2 (etype), -4..-9 (mac), etc
+            match="match u16 0x0800 0xFFFF at -2 \
+                   match u16 0x${M2} 0xFFFF at -4 \
+                   match u32 0x${M0}${M1} 0xFFFFFFFF at -8"
+        else
+            # dst MAC: bytes 0..5 → offsets -14 (etype), -12..-7 (mac)
+            match="match u16 0x0800 0xFFFF at -2 \
+                   match u16 0x${M1}${M2} 0xFFFFFFFF at -12 \
+                   match u16 0x${M0} 0xFFFF at -14"
+        fi
+    else
+        # IP match
+        if [ "$direction" = "src" ]; then
+            match="match ip src $target"
+        else
+            match="match ip dst $target"
+        fi
+    fi
+
+    local cmd="tc filter add dev $iface parent ffff: protocol $proto prio $prio u32 $match police rate ${kbit}kbit burst ${burst}k mtu 12k drop flowid :1"
+    eval "$cmd_var=\$cmd"
+    return 0
+}
+
+# ensure ingress qdisc on iface; record what we created so we don't disturb others
+ensure_ingress_qdisc() {
+    local iface="$1"
+    if ! ip link show dev "$iface" >/dev/null 2>&1; then
+        log_msg err "interface $iface not found"
+        return 1
+    fi
+    if tc qdisc show dev "$iface" ingress 2>/dev/null | grep -q "ingress qdisc ffff:"; then
+        return 0
+    fi
+    if tc qdisc add dev "$iface" handle ffff: ingress 2>/dev/null; then
+        echo "$iface" >> "$QDISC_STATE_FILE"
+        log_msg info "ingress qdisc added on $iface"
+    else
+        log_msg err "failed to add ingress qdisc on $iface"
+        return 1
+    fi
+}
+
+# remove all filters that we own (prio in [PRIO_BASE, PRIO_MAX]) on iface
+clear_filters_on_iface() {
+    local iface="$1"
+    tc -s filter show dev "$iface" parent ffff: 2>/dev/null | \
+        grep -oE "pref [0-9]+" | awk '{print $2}' | \
+        while read -r p; do
+            [ "$p" -ge "$PRIO_BASE" ] && [ "$p" -le "$PRIO_MAX" ] && \
+                tc filter del dev "$iface" parent ffff: prio "$p" 2>/dev/null
+        done
+}
+
+clear_all_rules() {
+    local iface
+    for iface in $(uci show limitpolice 2>/dev/null | sed -n "s/^limitpolice\.\(@rule\[[0-9]*\]\.interface\)=\(.*\)/\2/p" | sort -u); do
+        [ -n "$iface" ] && clear_filters_on_iface "$iface"
+    done
+    # also pick up interfaces from current state file
+    [ -f "$STATE_FILE" ] && cut -d' ' -f1 "$STATE_FILE" 2>/dev/null | sort -u | while read -r iface; do
+        [ -n "$iface" ] && clear_filters_on_iface "$iface"
+    done
+}
+
+start_service() {
+    load_modules
+    : > "$STATE_FILE"
+    : > "$QDISC_STATE_FILE"
+
+    config_load limitpolice
+
+    local main_enabled
+    config_get_bool main_enabled main enabled 0
+    [ "$main_enabled" = "1" ] || {
+        log_msg info "service disabled in UCI"
+        return 0
+    }
+
+    # walk rules
+    local prio=$PRIO_BASE
+    local iface_seen=""
+    config_foreach apply_rule rule prio
+}
+
+apply_rule() {
+    local rule_name="$1" var_prio="$2"
+    local iface target enabled
+    config_get_bool enabled "$rule_name" enabled 1
+    [ "$enabled" = "1" ] || return 0
+    config_get iface "$rule_name" interface ""
+    [ -z "$iface" ] && {
+        log_msg warn "rule $rule_name has no interface, skipping"
+        return 0
+    }
+
+    ensure_ingress_qdisc "$iface" || return 0
+
+    # allocate a fresh prio for this rule
+    eval local current_prio=\$$var_prio
+    local prio=$current_prio
+    eval $var_prio=$(( current_prio + 1 ))
+    [ "$prio" -gt "$PRIO_MAX" ] && {
+        log_msg err "too many rules (>$(( PRIO_MAX - PRIO_BASE )))"
+        return 0
+    }
+
+    local cmd
+    if build_filter_cmd cmd "$rule_name" "$prio" "$iface"; then
+        if eval "$cmd" 2>/dev/null; then
+            echo "$iface $prio $rule_name" >> "$STATE_FILE"
+            log_msg info "applied: $cmd"
+        else
+            log_msg err "filter failed: $cmd"
+        fi
+    fi
+}
+
+stop_service() {
+    clear_all_rules
+    # remove ingress qdiscs only if we added them
+    [ -f "$QDISC_STATE_FILE" ] && while read -r iface; do
+        [ -z "$iface" ] && continue
+        tc qdisc del dev "$iface" ingress 2>/dev/null && \
+            log_msg info "removed ingress qdisc on $iface"
+    done < "$QDISC_STATE_FILE"
+    rm -f "$STATE_FILE" "$QDISC_STATE_FILE"
+}
+
+reload_service() {
+    stop_service
+    start_service
+}
+
+status_service() {
+    echo "luci-app-limitpolice status"
+    echo "----------------------------"
+    if [ -f "$STATE_FILE" ]; then
+        cat "$STATE_FILE"
+    else
+        echo "(no active rules)"
+    fi
+    echo "--- ingress qdiscs ---"
+    for i in $(ls /sys/class/net 2>/dev/null); do
+        tc -s qdisc show dev "$i" ingress 2>/dev/null | grep -q . && echo "$i"
+    done
+}
