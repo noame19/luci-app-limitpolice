@@ -32,21 +32,26 @@ jobs:
         # text/shell only, so a single .ipk per arch covers every OpenWrt
         # release we support (18.06 → 24.10). Opkg resolves per-arch
         # kmod dependencies (kmod-sched-act-police etc.) at install time.
+        #
+        # SDK URL notes:
+        # - OpenWrt 24.10 ships SDKs as .tar.zst (not .tar.xz). Need
+        #   `tar --zstd` (GNU tar 1.31+, fine on ubuntu-22.04 runner).
+        # - 24.10.7 is the latest 24.10 point release.
         include:
           - name: x86_64 (soft-router / generic)
-            sdk: https://downloads.openwrt.org/releases/24.10.0/targets/x86/64/openwrt-sdk-24.10.0-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.xz
+            sdk: https://downloads.openwrt.org/releases/24.10.7/targets/x86/64/openwrt-sdk-24.10.7-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: x86_64
 
           # MediaTek MT7621, MT7628, RT305x etc. — the original "weak CPU"
           # target the README was written around.
           - name: mipsel_24kc (MT7621 / ramips)
-            sdk: https://downloads.openwrt.org/releases/24.10.0/targets/ramips/mt7621/openwrt-sdk-24.10.0-ramips-mt7621_gcc-13.3.0_musl.Linux-x86_64.tar.xz
+            sdk: https://downloads.openwrt.org/releases/24.10.7/targets/ramips/mt7621/openwrt-sdk-24.10.7-ramips-mt7621_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: mipsel_24kc
 
-          # MediaTek Filogic 820/830/880 (MT7981/86/88), ipq807x (some),
-          # plus armvirt 64. Modern 64-bit ARM home routers.
+          # MediaTek Filogic 820/830/880 (MT7981/86/88), plus armvirt 64.
+          # Modern 64-bit ARM home routers.
           - name: aarch64_cortex-a53 (Filogic / armvirt-64)
-            sdk: https://downloads.openwrt.org/releases/24.10.0/targets/mediatek/filogic/openwrt-sdk-24.10.0-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.xz
+            sdk: https://downloads.openwrt.org/releases/24.10.7/targets/mediatek/filogic/openwrt-sdk-24.10.7-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: aarch64_cortex-a53
 
     steps:
@@ -65,9 +70,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "Downloading ${{ matrix.sdk }}"
-          curl -fsSL "${{ matrix.sdk }}" -o sdk.tar.xz
-          tar -xJf sdk.tar.xz
-          rm sdk.tar.xz
+          curl -fsSL "${{ matrix.sdk }}" -o sdk.tar.zst
+          # OpenWrt 24.10 SDKs ship as .tar.zst (zstd-compressed). tar
+          # decompresses them via the `--zstd` flag (GNU tar >= 1.31).
+          tar --zstd -xf sdk.tar.zst
+          rm sdk.tar.zst
           if [ -d openwrt-sdk-* ]; then
             mv openwrt-sdk-* sdk
           fi
