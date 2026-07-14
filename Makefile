@@ -71,7 +71,7 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_DATA) ./files/usr/share/luci/menu.d/luci-app-limitpolice.json $(1)/usr/share/luci/menu.d/
 
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-check  $(1)/usr/sbin/
-	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-reset  $(1)/usr/sbin/
+	$(INSTALL_BIN)  ./files/usr/sbin/limitpoliced             $(1)/usr/sbin/
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-stats-clear $(1)/usr/sbin/
 endef
 

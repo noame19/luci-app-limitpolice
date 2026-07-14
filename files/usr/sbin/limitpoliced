@@ -1,0 +1,154 @@
+#!/bin/sh
+# /usr/sbin/limitpoliced
+#
+# luci-app-limitpolice 的常驻守护进程（~300 KB 常驻内存）。
+# 由 /etc/init.d/limitpolice 的 procd_open_instance 拉起，循环 sleep 10s。
+# 取代之前 busybox crond 的 5 行 cron 任务（quota-check + 3 个 stats-clear
+# + quota-reset）。
+#
+# 设计动机：
+#   1. 单线程顺序执行，天然免疫 rtnetlink 锁死与 quota-check / init.d reload
+#      之间的 race condition。
+#   2. UCI main.stats_interval 在网页可调，免去改 cron + reload crond 的麻烦。
+#   3. 跨日 / 跨周 / 跨月 + 每日 00:00 quota 重置由脚本内 date 比对触发，
+#      不再依赖 cron 表达式。
+#
+# 调度表（每次 10s 醒来后判断）：
+#   stats_interval 秒   → fork /usr/sbin/limitpolice-quota-check
+#   跨自然日              → fork /usr/sbin/limitpolice-stats-clear daily
+#                          + 00:00 时额外做 quota-reset（清 SNAP + reload）
+#   跨自然周（周一）       → fork /usr/sbin/limitpolice-stats-clear weekly
+#   跨自然月（1 号）       → fork /usr/sbin/limitpolice-stats-clear monthly
+#
+# 备份（stats-backup 脚本）由 commit 2 引入后追加到这里。
+#
+# 退出：procd 发送 TERM，trap 清掉状态文件后退出。
+
+UCI=limitpolice
+STATE_DIR=/var/run/limitpolice
+mkdir -p "$STATE_DIR" 2>/dev/null
+
+LAST_QUOTA_FILE=$STATE_DIR/last_quota
+LAST_DAY_FILE=$STATE_DIR/last_day
+LAST_WEEK_FILE=$STATE_DIR/last_week
+LAST_MONTH_FILE=$STATE_DIR/last_month
+
+log() { logger -t limitpoliced "$*"; }
+
+# 读 UCI 字段，缺省回退到默认
+read_uci() {
+    local v
+    v=$(uci -q get "$UCI.main.$1" 2>/dev/null)
+    echo "${v:-$2}"
+}
+
+# 取 + 校验 UCI 间隔；守护进程每 10s 醒来一次，每次都重新读 UCI（用户可能
+# 在 LuCI 改了之后下一次循环就生效）
+get_intervals() {
+    STATS_INTERVAL=$(read_uci stats_interval 300)
+    # sanitize: 只接受正整数
+    case "$STATS_INTERVAL" in ''|*[!0-9]*) STATS_INTERVAL=300 ;; esac
+    # 保护下限：10s（防用户设 1s 烧 CPU）
+    [ "$STATS_INTERVAL" -lt 10 ] && STATS_INTERVAL=10
+}
+
+# should_run <last_file> <interval>  →  返回 0 表示"该跑了"，并刷新 last_file
+should_run() {
+    local last_file="$1" interval="$2" now last
+    now=$(date +%s)
+    if [ ! -f "$last_file" ]; then
+        echo "$now" > "$last_file"
+        return 0
+    fi
+    last=$(cat "$last_file" 2>/dev/null || echo 0)
+    if [ $((now - last)) -ge "$interval" ]; then
+        echo "$now" > "$last_file"
+        return 0
+    fi
+    return 1
+}
+
+# 实际任务包装：fork 子脚本，自己不阻塞
+do_quota_check() {
+    /usr/sbin/limitpolice-quota-check >/dev/null 2>&1
+    log "quota-check done"
+}
+
+do_clear() {
+    /usr/sbin/limitpolice-stats-clear "$1" >/dev/null 2>&1
+    log "stats-clear $1 done"
+}
+
+do_quota_reset() {
+    rm -f /var/run/limitpolice/quota
+    /etc/init.d/limitpolice reload >/dev/null 2>&1
+    log "quota-reset done (daily)"
+}
+
+# 跨期检测 + 触发对应清零 / 重置
+# 用 LAST_DAY_FILE（YYYYMMDD 字符串）作为"上次清醒日"参考：
+#   - 当前日期 != 上次日期 → 跨日，触发 daily 清零
+#   - 当前是周一 00:00     → 触发 weekly 清零（每周一次，靠 LAST_WEEK_FILE 防重）
+#   - 当前是 1 号 00:00    → 触发 monthly 清零（每月一次，靠 LAST_MONTH_FILE 防重）
+#   - 跨日 且 00:00        → 触发 quota-reset（清 SNAP + reload）
+check_crossings() {
+    local today dow dom last_today hhmm
+    today=$(date +%Y%m%d)
+    dow=$(date +%u)     # 1=Mon ... 7=Sun
+    dom=$(date +%d)     # 01-31
+    hhmm=$(date +%H%M)  # 0000-2359
+
+    if [ -f "$LAST_DAY_FILE" ]; then
+        last_today=$(cat "$LAST_DAY_FILE")
+    else
+        last_today=""
+    fi
+    echo "$today" > "$LAST_DAY_FILE"
+
+    # 跨日 + 00:00 → quota-reset（清 SNAP + 重建 filter 解封 1kbit）
+    if [ -n "$last_today" ] && [ "$today" != "$last_today" ] && [ "$hhmm" = "0000" ]; then
+        do_quota_reset
+    fi
+
+    # 跨日 → 每日清零
+    if [ -n "$last_today" ] && [ "$today" != "$last_today" ]; then
+        do_clear daily
+    fi
+
+    # 周一 00:00 → 周清零（每周仅一次）
+    if [ "$dow" = "1" ] && [ "$hhmm" = "0000" ]; then
+        if [ ! -f "$LAST_WEEK_FILE" ] || [ "$(cat "$LAST_WEEK_FILE")" != "$today" ]; then
+            do_clear weekly
+            echo "$today" > "$LAST_WEEK_FILE"
+        fi
+    fi
+
+    # 1 号 00:00 → 月清零（每月仅一次）
+    if [ "$dom" = "01" ] && [ "$hhmm" = "0000" ]; then
+        if [ ! -f "$LAST_MONTH_FILE" ] || [ "$(cat "$LAST_MONTH_FILE")" != "$today" ]; then
+            do_clear monthly
+            echo "$today" > "$LAST_MONTH_FILE"
+        fi
+    fi
+}
+
+cleanup() {
+    log "shutting down"
+    rm -f "$LAST_QUOTA_FILE" "$LAST_DAY_FILE" "$LAST_WEEK_FILE" "$LAST_MONTH_FILE"
+    exit 0
+}
+trap cleanup TERM INT
+
+log "started (sleep 10s, stats_interval=${STATS_INTERVAL:-300})"
+
+while true; do
+    get_intervals
+
+    if should_run "$LAST_QUOTA_FILE" "$STATS_INTERVAL"; then
+        do_quota_check
+    fi
+
+    check_crossings
+
+    sleep 10
+done
