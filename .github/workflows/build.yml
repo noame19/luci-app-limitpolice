@@ -1,14 +1,5 @@
 name: Build IPK
 
-# Triggers:
-#   - manual run (workflow_dispatch)
-#   - any tag matching v*
-#   - pushes to main that touch the package itself
-#
-# Matrix is per-architecture ONLY. Each .ipk is built once per arch
-# (PKGARCH=all → contents are arch-independent) and is installable on
-# every supported OpenWrt release (18.06 → 24.10), as long as the host
-# router matches the arch tag in the package name.
 on:
   workflow_dispatch:
   push:
@@ -28,29 +19,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One entry per target hardware family. The package contents are
-        # text/shell only, so a single .ipk per arch covers every OpenWrt
-        # release we support (18.06 → 24.10). Opkg resolves per-arch
-        # kmod dependencies (kmod-sched-act-police etc.) at install time.
+        # Each entry is one target hardware family. The package contents
+        # are text/shell only, so a single .ipk per arch covers every
+        # OpenWrt release we support (18.06 → 24.10). Opkg resolves
+        # per-arch kmod dependencies at install time.
         #
-        # SDK URL notes:
-        # - OpenWrt 24.10 ships SDKs as .tar.zst (not .tar.xz). Need
-        #   `tar --zstd` (GNU tar 1.31+, fine on ubuntu-22.04 runner).
-        # - 24.10.7 is the latest 24.10 point release.
+        # Build SDK is OpenWrt 24.10.7 (latest 24.10 point release).
+        # SDK archives use .tar.zst (zstd) since OpenWrt 24.10.
+        #
+        # Artifact names MUST NOT contain / \ : * ? " < > | because of
+        # NTFS download compatibility. We use short, filesystem-safe
+        # labels (mt7621 / filogic) for the artifact, and the full
+        # OpenWrt arch name (mipsel_24kc / aarch64_cortex-a53) only as
+        # the IPK output directory inside the SDK.
         include:
-          - name: x86_64 (soft-router / generic)
-            sdk: https://downloads.openwrt.org/releases/24.10.7/targets/x86/64/openwrt-sdk-24.10.7-x86-64_gcc-13.3.0_musl.Linux-x86_64.tar.zst
-            packages_dir: x86_64
-
-          # MediaTek MT7621, MT7628, RT305x etc. — the original "weak CPU"
-          # target the README was written around.
-          - name: mipsel_24kc (MT7621 / ramips)
+          - name: mt7621
             sdk: https://downloads.openwrt.org/releases/24.10.7/targets/ramips/mt7621/openwrt-sdk-24.10.7-ramips-mt7621_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: mipsel_24kc
 
-          # MediaTek Filogic 820/830/880 (MT7981/86/88), plus armvirt 64.
-          # Modern 64-bit ARM home routers.
-          - name: aarch64_cortex-a53 (Filogic / armvirt-64)
+          - name: filogic
             sdk: https://downloads.openwrt.org/releases/24.10.7/targets/mediatek/filogic/openwrt-sdk-24.10.7-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: aarch64_cortex-a53
 
@@ -71,8 +58,7 @@ jobs:
           set -euo pipefail
           echo "Downloading ${{ matrix.sdk }}"
           curl -fsSL "${{ matrix.sdk }}" -o sdk.tar.zst
-          # OpenWrt 24.10 SDKs ship as .tar.zst (zstd-compressed). tar
-          # decompresses them via the `--zstd` flag (GNU tar >= 1.31).
+          # 24.10 SDKs ship as .tar.zst — GNU tar 1.31+ supports `--zstd`.
           tar --zstd -xf sdk.tar.zst
           rm sdk.tar.zst
           if [ -d openwrt-sdk-* ]; then
@@ -86,7 +72,7 @@ jobs:
           mkdir -p sdk/package/luci-app-limitpolice
           cp Makefile sdk/package/luci-app-limitpolice/Makefile
           cp LICENSE  sdk/package/luci-app-limitpolice/LICENSE
-          cp -r files sdk/package/luci-app-limitpolice/files
+          cp -r files  sdk/package/luci-app-limitpolice/files
 
       - name: Build package
         working-directory: sdk
@@ -101,12 +87,20 @@ jobs:
           echo "==== built artifacts ===="
           find bin/packages -name 'luci-app-limitpolice*.ipk' -print -exec ls -lh {} +
 
+      - name: Verify ipk was produced
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          ipks=( sdk/bin/packages/${{ matrix.packages_dir }}/**/luci-app-limitpolice*.ipk )
+          if [ ${#ipks[@]} -eq 0 ]; then
+            echo "::error::No ipk found under sdk/bin/packages/${{ matrix.packages_dir }}/"
+            exit 1
+          fi
+          echo "Will upload: ${ipks[@]}"
+
       - name: Upload .ipk artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-limitpolice-${{ matrix.name }}
-          # ipk lands in <arch>/base/ (not directly <arch>/) per OpenWrt
-          # buildroot convention. Use ** to be robust if the category
-          # changes in future SDK releases.
           path: sdk/bin/packages/${{ matrix.packages_dir }}/**/luci-app-limitpolice*.ipk
           if-no-files-found: error
