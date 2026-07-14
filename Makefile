@@ -49,6 +49,7 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
+	$(INSTALL_DIR) $(1)/usr/sbin
 
 	$(INSTALL_CONF) ./files/etc/config/limitpolice $(1)/etc/config/
 	$(INSTALL_BIN)  ./files/etc/init.d/limitpolice $(1)/etc/init.d/
@@ -59,6 +60,9 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua $(1)/usr/lib/lua/luci/model/cbi/
 
 	$(INSTALL_DATA) ./files/usr/share/luci/menu.d/luci-app-limitpolice.json $(1)/usr/share/luci/menu.d/
+
+	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-check  $(1)/usr/sbin/
+	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-reset  $(1)/usr/sbin/
 endef
 
 # Run once on the device after opkg install. Auto-enable + restart so the

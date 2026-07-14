@@ -1,0 +1,157 @@
+#!/bin/sh
+# /usr/sbin/limitpolice-quota-check
+#
+# Cron entry: */5 * * * *. Re-derive every rule's daily byte counter from
+# the live `tc -s filter show` output, compare against the per-IP daily
+# quota declared in UCI, and (when exceeded) drop the offending filter to
+# 1 kbit police rate as a punitive block.
+#
+# State file: /var/run/limitpolice/quota
+#   Format (whitespace-separated):
+#     <iface>:<target>:<dir>  <total_bytes>  <last_tc_bytes>
+#
+# Key choice: we key by <iface>:<target>:<dir>, NOT by filter prio. Prio
+# is reassigned from PRIO_BASE on every service restart (it depends on
+# how many enabled rules precede this one), so a prio-based key would
+# leak bytes across restarts. The target+iface+dir triple is stable.
+
+UCI=limitpolice
+SD=/var/run/limitpolice
+SNAP=$SD/quota
+LOCK=$SD/.lock
+
+mkdir -p "$SD" || exit 0
+
+# Single-instance guard — if a previous run is still in flight (rare on
+# 64 MB boxes but possible during boot storms) just exit.
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
+# If the main service is disabled there are no live filters to read.
+[ "$(/sbin/uci -q get "$UCI.main.enabled")" = "1" ] || exit 0
+
+. /etc/functions.sh
+
+log() { logger -t limitpolice-quota "$*"; }
+
+# ---- helpers ----
+
+# parse_filters <iface>  ->  emit "pref|match_text|bytes\n" per filter
+parse_filters() {
+    tc -s filter show dev "$1" parent ffff: 2>/dev/null | awk '
+        BEGIN { p=""; m="" }
+        /^filter parent .* pref [0-9]+/ {
+            for (i = 1; i <= NF; i++) if ($i == "pref") { p = $(i+1); break }
+        }
+        /match ip (src|dst) / { m = $0; next }
+        /^[[:space:]]+Sent [0-9]+ bytes/ {
+            for (i = 1; i <= NF; i++) if ($i == "Sent") { b = $(i+1); break }
+            if (m != "" && p != "") { printf "%s|%s|%s\n", p, m, b; m=""; p="" }
+        }
+    '
+}
+
+# read_row <key>  ->  echoes "<total> <last_tc>" or empty
+read_row() {
+    awk -v k="$1" '$1 == k { sub(/^[^ ]+ /, ""); print; exit }' \
+        "$SNAP" 2>/dev/null
+}
+
+# write_row <key> <total> <last_tc>
+write_row() {
+    { grep -v "^$1 " "$SNAP" 2>/dev/null
+      printf "%s %s %s\n" "$1" "$2" "$3"
+    } > "$SNAP.tmp"
+    mv "$SNAP.tmp" "$SNAP"
+}
+
+quota_bytes() {
+    case "$2" in
+        KB) echo $(( $1 * 1024 ));;
+        MB) echo $(( $1 * 1048576 ));;
+        GB) echo $(( $1 * 1073741824 ));;
+        TB) echo $(( $1 * 1099511627776 ));;
+        *)  echo $(( $1 * 1048576 ));;
+    esac
+}
+
+# Replace one filter with a 1 kbit police. tc -s filter show is queried
+# again (cheap) to find the live prio for this rule's match.
+throttle_rule() {
+    local iface="$1" rule="$2"
+    local target dir match prio
+    config_get target "$rule" target      ""
+    config_get dir    "$rule" direction   "dst"
+    match="match ip $dir $target"
+
+    prio=$(tc -s filter show dev "$iface" parent ffff: 2>/dev/null \
+        | awk -v m="$match" '
+            /^filter parent .* pref [0-9]+/ {
+                for (i = 1; i <= NF; i++) if ($i == "pref") { p = $(i+1); break }
+            }
+            $0 == m { print p; exit }
+        ')
+    [ -n "$prio" ] || return 0
+
+    tc filter del dev "$iface" parent ffff: prio "$prio" 2>/dev/null
+    tc filter add dev "$iface" parent ffff: protocol ip \
+        prio "$prio" u32 $match \
+        police rate 1kbit burst 4k mtu 12k drop flowid :1 2>/dev/null
+    log "throttled $target on $iface (prio $prio, daily quota exceeded)"
+}
+
+check_rule() {
+    local rule="$1" iface="$2" parsed="$3"
+    local enabled quota qunit target dir match cur_tc k
+    config_get_bool enabled "$rule" enabled 1
+    [ "$enabled" = "1" ] || return 0
+    config_get quota  "$rule" quota     "0"
+    [ "$quota" -gt 0 ] 2>/dev/null || return 0
+    config_get qunit  "$rule" quota_unit "MB"
+    config_get target "$rule" target      ""
+    [ -n "$target" ] || return 0
+    config_get dir    "$rule" direction   "dst"
+
+    match="match ip $dir $target"
+    cur_tc=$(grep -F "$match|" "$parsed" 2>/dev/null | head -1 | cut -d'|' -f3)
+    [ -n "$cur_tc" ] || return 0
+
+    k="${iface}:${target}:${dir}"
+    local prev total=0 last_tc=0
+    prev=$(read_row "$k")
+    if [ -n "$prev" ]; then
+        total=$(echo "$prev"   | awk '{print $1}')
+        last_tc=$(echo "$prev" | awk '{print $2}')
+    fi
+
+    local delta=0
+    if [ -n "$last_tc" ] && [ "$cur_tc" -ge "$last_tc" ] 2>/dev/null; then
+        delta=$((cur_tc - last_tc))
+    fi
+    local new_total=$((total + delta))
+    write_row "$k" "$new_total" "$cur_tc"
+
+    local limit_bytes
+    limit_bytes=$(quota_bytes "$quota" "$qunit")
+    if [ "$new_total" -gt "$limit_bytes" ]; then
+        throttle_rule "$iface" "$rule"
+    fi
+}
+
+process_iface() {
+    local iface="$1" parsed
+    parsed="$SD/parsed-$$-$iface"
+    parse_filters "$iface" > "$parsed"
+    config_foreach check_rule rule "$iface" "$parsed"
+    rm -f "$parsed"
+}
+
+# ---- main ----
+config_load "$UCI"
+
+for iface in $(uci show "$UCI" 2>/dev/null \
+              | sed -n 's/^limitpolice\..*\.interface=//p' \
+              | sort -u); do
+    [ -n "$iface" ] || continue
+    process_iface "$iface"
+done

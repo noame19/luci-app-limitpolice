@@ -167,6 +167,28 @@ service_triggers() {
     procd_add_reload_trigger "limitpolice"
 }
 
+# Install cron entries for quota enforcement. Idempotent: rewrites only the
+# two lines we own, leaves any user crontab alone. The check runs every 5
+# minutes; the reset runs at 00:00 daily (clears counters and rebuilds
+# filters at their declared rate so any punitive 1kbit block is lifted).
+install_cron() {
+    local f=/etc/crontabs/root
+    [ -f "$f" ] || touch "$f"
+    sed -i '/limitpolice-quota-check/d; /limitpolice-quota-reset/d' "$f"
+    cat >> "$f" <<'EOF'
+*/5 * * * * /usr/sbin/limitpolice-quota-check >/dev/null 2>&1
+0 0 * * * /usr/sbin/limitpolice-quota-reset >/dev/null 2>&1
+EOF
+    /etc/init.d/cron reload 2>/dev/null || /etc/init.d/cron restart 2>/dev/null
+}
+
+remove_cron() {
+    local f=/etc/crontabs/root
+    [ -f "$f" ] || return 0
+    sed -i '/limitpolice-quota-check/d; /limitpolice-quota-reset/d' "$f"
+    /etc/init.d/cron reload 2>/dev/null
+}
+
 start_service() {
     load_modules
     : > "$STATE_FILE"
@@ -185,6 +207,10 @@ start_service() {
     local prio=$PRIO_BASE
     local iface_seen=""
     config_foreach apply_rule rule prio
+
+    # Always (re-)install cron entries — cheap and idempotent. Even with
+    # no quota rules today, the user may add one later without restart.
+    install_cron
 }
 
 apply_rule() {
@@ -221,6 +247,7 @@ apply_rule() {
 }
 
 stop_service() {
+    remove_cron
     clear_all_rules
     # remove ingress qdiscs only if we added them
     [ -f "$QDISC_STATE_FILE" ] && while read -r iface; do

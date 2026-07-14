@@ -141,6 +141,23 @@ r_unit:value("KB/s", translate("KB/s (kilobytes per second)"))
 r_unit:value("MB/s", translate("MB/s (megabytes per second)"))
 r_unit.default = "Mbps"
 
+local r_q = rules:option(Value, "quota", translate("Daily quota (0 = off)"))
+r_q.datatype = "uinteger"
+r_q.default  = "0"
+r_q.placeholder = "0"
+r_q.description = translate("When exceeded, this device's filter is dropped to "
+    .. "<code>1 kbit</code> as a punitive block until the next 00:00 reset. "
+    .. "Counters are derived from <code>tc -s filter show</code> bytes, so the "
+    .. "value reflects the actual ingress bytes seen on this iface, not the "
+    .. "post-NAT traffic. No daemon — a cron job runs the check every 5 min.")
+
+local r_qu = rules:option(ListValue, "quota_unit", translate("Quota unit"))
+r_qu:value("KB", "KB")
+r_qu:value("MB", "MB")
+r_qu:value("GB", "GB")
+r_qu:value("TB", "TB")
+r_qu.default = "MB"
+
 local r_c = rules:option(Value, "comment", translate("Note"))
 r_c.placeholder = "iphone, smart-tv, …"
 r_c.rmempty = true

@@ -74,6 +74,21 @@ r_unit:value("KB/s", translate("KB/s (kilobytes per second)"))
 r_unit:value("MB/s", translate("MB/s (megabytes per second)"))
 r_unit.default = "Mbps"
 
+local r_q = s:option(Value, "quota", translate("Daily quota (0 = off)"))
+r_q.datatype = "uinteger"
+r_q.default  = "0"
+r_q.placeholder = "0"
+r_q.description = translate("When exceeded, this device's filter is dropped to "
+    .. "<code>1 kbit</code> until the next 00:00 reset. "
+    .. "Counted from <code>tc -s filter show</code> bytes.")
+
+local r_qu = s:option(ListValue, "quota_unit", translate("Quota unit"))
+r_qu:value("KB", "KB")
+r_qu:value("MB", "MB")
+r_qu:value("GB", "GB")
+r_qu:value("TB", "TB")
+r_qu.default = "MB"
+
 local r_c = s:option(Value, "comment", translate("Note"))
 r_c.rmempty = true
 r_c.placeholder = "iphone, smart-tv, …"
