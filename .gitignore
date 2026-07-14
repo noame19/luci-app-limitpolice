@@ -1,0 +1,19 @@
+# build artifacts
+*.ipk
+*.tar.gz
+*.tar.xz
+*.zip
+bin/
+build_dir/
+staging_dir/
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# generated
+htdocs/luci-static/resources/view/limitpolice/
