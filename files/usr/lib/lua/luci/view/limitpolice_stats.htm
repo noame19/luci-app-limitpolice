@@ -1,0 +1,99 @@
+<%#
+  luci-app-limitpolice — Traffic Report view
+  Backed by /tmp/limitpolice/stats/* written every 5 minutes by
+  limitpolice-quota-check. No background process; this template only
+  renders when the tab is open.
+%>
+<%+header%>
+
+<h2 name="content"><%:Traffic Report%></h2>
+
+<%
+  local function fmt_bytes(b)
+    b = tonumber(b) or 0
+    if b < 1024 then return string.format("%d B", b) end
+    if b < 1048576 then return string.format("%.1f KB", b / 1024) end
+    if b < 1073741824 then return string.format("%.2f MB", b / 1048576) end
+    return string.format("%.2f GB", b / 1073741824)
+  end
+
+  local function age(epoch)
+    if not epoch then return "—" end
+    local d = tonumber(now) - tonumber(epoch)
+    if d < 0 then return "just now" end
+    if d < 60 then return d .. "s ago" end
+    if d < 3600 then return math.floor(d / 60) .. "m ago" end
+    if d < 86400 then return math.floor(d / 3600) .. "h ago" end
+    return math.floor(d / 86400) .. "d ago"
+  end
+%>
+
+<div class="cbi-map-descr">
+  <%:Per-device daily / weekly / monthly traffic derived from%>
+  <code>tc -s filter show</code>
+  <%:counters maintained by a cron job. Counts reset on reboot (no flash
+  writes). Open the main%>
+  <a href="<%=luci.dispatcher.build_url('admin/network/limitpolice')%>"><%:Limit Police%></a>
+  <%:page to add rate-limit or daily-quota rules.%>
+</div>
+
+<% if not stats_dir_exists or #rows == 0 then %>
+  <div class="alert-message info">
+    <%:No stats yet. The cron job runs every 5 minutes — check back after
+    a few cycles. You can verify with:%>
+    <code>ls /tmp/limitpolice/stats/</code>
+  </div>
+<% else %>
+  <table class="table" style="width:100%; margin-top:1em;">
+    <thead>
+      <tr>
+        <th><%:Device%></th>
+        <th><%:MAC / IP%></th>
+        <th><%:Today ↓%></th>
+        <th><%:Today ↑%></th>
+        <th><%:Week ↓%></th>
+        <th><%:Week ↑%></th>
+        <th><%:Month ↓%></th>
+        <th><%:Month ↑%></th>
+        <th><%:Last seen%></th>
+        <th><%:Quick config%></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for _, r in ipairs(rows) do %>
+        <tr<% if not r.is_mac then %> style="opacity:0.6;"<% end %>>
+          <td><%=r.name%></td>
+          <td>
+            <small><%=r.id%></small><br/>
+            <small style="color:#888;"><%=r.ip%></small>
+          </td>
+          <td><%=fmt_bytes(r.today_down)%></td>
+          <td><%=fmt_bytes(r.today_up)%></td>
+          <td><%=fmt_bytes(r.week_down)%></td>
+          <td><%=fmt_bytes(r.week_up)%></td>
+          <td><%=fmt_bytes(r.month_down)%></td>
+          <td><%=fmt_bytes(r.month_up)%></td>
+          <td><small><%=age(r.epoch)%></small></td>
+          <td>
+            <a class="btn cbi-button" href="<%=r.limit_url%>"
+               title="<%:Add a real-time rate limit for this device%>">
+              <%:Limit%>
+            </a>
+            <a class="btn cbi-button" href="<%=r.ip_url%>"
+               title="<%:Add a daily quota for this device%>">
+              <%:Quota%>
+            </a>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+
+  <p class="cbi-map-descr" style="margin-top:1em;">
+    <em><%:Unknown devices (greyed) have no DHCP lease — usually static-IP
+    hosts or devices that have not yet completed DHCP. Use the IP-based
+    quick-config button to add a rule manually.%></em>
+  </p>
+<% end %>
+
+<%+footer%>

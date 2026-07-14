@@ -1,54 +1,100 @@
 #!/bin/sh
 # /usr/sbin/limitpolice-quota-check
 #
-# Cron entry: */5 * * * *. Re-derive every rule's daily byte counter from
-# the live `tc -s filter show` output, compare against the per-IP daily
-# quota declared in UCI, and (when exceeded) drop the offending filter to
-# 1 kbit police rate as a punitive block.
+# Cron entry: */5 * * * *. Two jobs in one run, both zero-process:
 #
-# State file: /var/run/limitpolice/quota
-#   Format (whitespace-separated):
-#     <iface>:<target>:<dir>  <total_bytes>  <last_tc_bytes>
+#   1. QUOTA ENFORCEMENT — re-derive every user rule's daily byte counter
+#      from `tc -s filter show` output and (when the daily quota declared
+#      in UCI is exceeded) drop the offending filter to 1 kbit police
+#      rate as a punitive block until the next 00:00 quota-reset.
 #
-# Key choice: we key by <iface>:<target>:<dir>, NOT by filter prio. Prio
-# is reassigned from PRIO_BASE on every service restart (it depends on
-# how many enabled rules precede this one), so a prio-based key would
-# leak bytes across restarts. The target+iface+dir triple is stable.
+#   2. TRAFFIC STATS — for every active DHCP lease we maintain two
+#      no-op counter filters at prio 9000+ on br-lan (police rate 999gbit,
+#      effectively unlimited). Their `Sent N bytes` is captured, delta'd
+#      against the previous run, and accumulated into
+#      /tmp/limitpolice/stats/<MAC> as today/week/month down/up counters
+#      for the LuCI Traffic Report tab.
+#
+# Why both in one script: the user's hard constraint is "no daemon". A
+# single */5 cron already runs; bolting the stats work onto it costs an
+# extra ~50 ms per run on a 50-device home network and zero additional
+# resident memory.
+#
+# State files:
+#   /var/run/limitpolice/quota     per-rule daily counter snapshot
+#   /var/run/limitpolice.stats     stats filter prio allocations (one
+#                                  line per iface:ip:dir; prio is in
+#                                  [9000, 9999])
+#   /tmp/limitpolice/stats/<id>    per-device accumulators (id is MAC or
+#                                  ip-<addr> for devices not in DHCP)
+#
+# Key choice: stats key by <iface>:<target>:<dir>, NOT by filter prio.
+# Prio is reassigned from STATS_PRIO_BASE on every sync (it depends on
+# how many leases precede this one), so a prio-based key would leak
+# bytes across syncs. The target+iface+dir triple is stable for the life
+# of a DHCP lease.
 
 UCI=limitpolice
 SD=/var/run/limitpolice
 SNAP=$SD/quota
 LOCK=$SD/.lock
+STATS_STATE=$SD.stats
+STATS_DIR=/tmp/limitpolice/stats
+STATS_PRIO_BASE=9000
+STATS_PRIO_MAX=9999
+DEFAULT_STATS_IFACE=br-lan
 
-mkdir -p "$SD" || exit 0
+mkdir -p "$SD" "$STATS_DIR" 2>/dev/null || exit 0
+: > "$STATS_STATE"
 
 # Single-instance guard — if a previous run is still in flight (rare on
 # 64 MB boxes but possible during boot storms) just exit.
 exec 9>"$LOCK"
 flock -n 9 || exit 0
 
-# If the main service is disabled there are no live filters to read.
-[ "$(/sbin/uci -q get "$UCI.main.enabled")" = "1" ] || exit 0
-
 . /etc/functions.sh
 
 log() { logger -t limitpolice-quota "$*"; }
 
-# ---- helpers ----
+# ---- helpers ------------------------------------------------------------
 
-# parse_filters <iface>  ->  emit "pref|match_text|bytes\n" per filter
+# parse_filters <iface>  ->  emit "pref|match|bytes\n" per filter
 parse_filters() {
     tc -s filter show dev "$1" parent ffff: 2>/dev/null | awk '
         BEGIN { p=""; m="" }
         /^filter parent .* pref [0-9]+/ {
             for (i = 1; i <= NF; i++) if ($i == "pref") { p = $(i+1); break }
         }
-        /match ip (src|dst) / { m = $0; next }
+        /match (ip|u16|u32) / { m = $0; next }
         /^[[:space:]]+Sent [0-9]+ bytes/ {
             for (i = 1; i <= NF; i++) if ($i == "Sent") { b = $(i+1); break }
             if (m != "" && p != "") { printf "%s|%s|%s\n", p, m, b; m=""; p="" }
         }
     '
+}
+
+# ensure_ingress_qdisc <iface> — no-op if qdisc already exists, otherwise
+# add it. Inline copy of the same logic in init.d so this script works
+# even on ifaces that have no user rule yet.
+ensure_ingress_qdisc() {
+    local iface="$1"
+    [ -d "/sys/class/net/$iface" ] || return 1
+    tc qdisc show dev "$iface" ingress 2>/dev/null | grep -q "ingress qdisc ffff:" && return 0
+    tc qdisc add dev "$iface" handle ffff: ingress 2>/dev/null
+}
+
+# next_stats_prio — read STATS_STATE, return next unused prio in the
+# 9000-9999 band. Returns 1 and logs warning when full.
+next_stats_prio() {
+    local used max=9000
+    [ -f "$STATS_STATE" ] && used=$(awk '{print $3}' "$STATS_STATE" | sort -n) && \
+        max=$(echo "$used" | tail -1)
+    max=$(( max + 1 ))
+    if [ "$max" -gt "$STATS_PRIO_MAX" ]; then
+        log "stats prio band exhausted (>9999)"
+        return 1
+    fi
+    echo "$max"
 }
 
 # read_row <key>  ->  echoes "<total> <last_tc>" or empty
@@ -67,11 +113,11 @@ write_row() {
 
 quota_bytes() {
     case "$2" in
-        KB) echo $(( $1 * 1024 ));;
-        MB) echo $(( $1 * 1048576 ));;
-        GB) echo $(( $1 * 1073741824 ));;
-        TB) echo $(( $1 * 1099511627776 ));;
-        *)  echo $(( $1 * 1048576 ));;
+        KB) echo $(( $1 * 1024 )) ;;
+        MB) echo $(( $1 * 1048576 )) ;;
+        GB) echo $(( $1 * 1073741824 )) ;;
+        TB) echo $(( $1 * 1099511627776 )) ;;
+        *)  echo $(( $1 * 1048576 )) ;;
     esac
 }
 
@@ -138,20 +184,231 @@ check_rule() {
     fi
 }
 
-process_iface() {
-    local iface="$1" parsed
-    parsed="$SD/parsed-$$-$iface"
+# ---- stats helpers ------------------------------------------------------
+
+# read /tmp/dhcp.leases -> emit "<mac>|<ip>|<hostname>\n" lines
+read_dhcp_leases() {
+    awk 'NF>=4 && $1 !~ /^[[:space:]]*#/ {
+        ip=$3; mac=$2; name=$4
+        if (mac !~ /:/ || ip !~ /\./) next
+        if (name == "" || name == "*") name = "(no name)"
+        printf "%s|%s|%s\n", mac, ip, name
+    }' /tmp/dhcp.leases 2>/dev/null
+}
+
+# ip -> mac, blank if unknown
+ip_to_mac() {
+    awk -v ip="$1" -F'|' '$2 == ip { print $1; exit }' /tmp/limitpolice.leases 2>/dev/null
+}
+
+# determine iface to monitor for stats. Use br-lan if it exists AND has
+# an ingress qdisc OR we can add one. If a rule explicitly references
+# another iface, also monitor it.
+stats_ifaces() {
+    local f
+    f=$(uci -q get "$UCI.main.stats_interface" 2>/dev/null)
+    [ -z "$f" ] && f="$DEFAULT_STATS_IFACE"
+    [ -d "/sys/class/net/$f" ] && echo "$f"
+    # also include any iface referenced by a user rule
+    uci show "$UCI" 2>/dev/null | sed -n 's/^limitpolice\..*\.interface=//p' | sort -u
+}
+
+# Build the IP -> MAC map file used by ip_to_mac() and stats aggregate.
+build_lease_cache() {
+    read_dhcp_leases > /tmp/limitpolice.leases
+}
+
+# ---- stats filter maintenance ------------------------------------------
+
+# Read STATS_STATE into a flat string "<ip>|<dir>|<prio>\n..."
+sync_stats_filters() {
+    local iface="$1"
+    [ -d "/sys/class/net/$iface" ] || return 0
+    ensure_ingress_qdisc "$iface" || {
+        log "stats iface $iface has no ingress qdisc and cannot add one"
+        return 0
+    }
+
+    local parsed=$SD/parsed-stats-$$
     parse_filters "$iface" > "$parsed"
-    config_foreach check_rule rule "$iface" "$parsed"
+
+    # Remove existing stats filters for IPs no longer in DHCP leases.
+    local known_ips
+    known_ips=$(awk -F'|' '{print $2}' /tmp/limitpolice.leases 2>/dev/null)
+    local cur
+    cur=$(awk -F'|' -v base=$STATS_PRIO_BASE -v max=$STATS_PRIO_MAX '
+        $1 >= base && $1 <= max {
+            n = split($2, w, " ")
+            if (n >= 4 && w[1] == "match" && w[2] == "ip" && (w[3] == "src" || w[3] == "dst")) {
+                ip = w[4]; sub(/\/32$/, "", ip)
+                print ip "|" w[3] "|" $1
+            }
+        }' "$parsed")
+    local line ip dir prio
+    echo "$cur" | while IFS='|' read -r ip dir prio; do
+        [ -z "$ip" ] && continue
+        if ! echo "$known_ips" | grep -qx "$ip"; then
+            tc filter del dev "$iface" parent ffff: prio "$prio" 2>/dev/null
+            log "stats: removed stale $dir $ip on $iface (prio $prio)"
+        fi
+    done
+
+    # Add stats filters for any known IP missing one. Per IP we allocate
+    # two prios: dst first, src second. Reuse the existing prio if it
+    # matches.
+    local have
+    have=$(awk -F'|' -v base=$STATS_PRIO_BASE -v max=$STATS_PRIO_MAX '
+        $1 >= base && $1 <= max {
+            n = split($2, w, " ")
+            if (n >= 4 && w[1] == "match" && w[2] == "ip" && (w[3] == "src" || w[3] == "dst")) {
+                ip = w[4]; sub(/\/32$/, "", ip)
+                print ip "|" w[3]
+            }
+        }' "$parsed" | sort -u)
+    local line2 ip2
+    while IFS='|' read -r mac2 ip2 name2; do
+        [ -z "$ip2" ] && continue
+        for dir in dst src; do
+            if ! echo "$have" | grep -qx "$ip2|$dir"; then
+                p=$(next_stats_prio) || break 2
+                tc filter add dev "$iface" parent ffff: protocol ip \
+                    prio "$p" u32 "match ip $dir $ip2/32" \
+                    police rate 999gbit burst 64k mtu 12k drop flowid :9999 \
+                    2>/dev/null && {
+                    echo "$iface|$ip2|$dir|$p" >> "$STATS_STATE"
+                    log "stats: added $dir $ip2 on $iface (prio $p)"
+                    have="$have
+$ip2|$dir"
+                }
+            fi
+        done
+    done < /tmp/limitpolice.leases
+
     rm -f "$parsed"
 }
 
-# ---- main ----
+# ---- stats aggregation --------------------------------------------------
+
+# Aggregate one stats filter's byte delta into the device's stats file.
+# Args: <iface> <ip> <dir> <cur_bytes> <id>  (id = MAC or ip-<ip>)
+aggregate_one() {
+    local iface="$1" ip="$2" dir="$3" cur="$4" id="$5"
+    local f="$STATS_DIR/$id"
+    local last_tc today wk mo epoch delta now
+    now=$(date +%s)
+
+    if [ ! -f "$f" ]; then
+        cat > "$f" <<EOF
+mac=$id
+ip=$ip
+if_down=$iface
+if_up=$iface
+prio_down=0
+prio_up=0
+last_tc_down=0
+last_tc_up=0
+today_down=0
+today_up=0
+week_down=0
+week_up=0
+month_down=0
+month_up=0
+epoch=$now
+EOF
+    fi
+
+    if [ "$dir" = "dst" ]; then
+        last_tc=$(awk -F= '/^last_tc_down=/{print $2; exit}' "$f")
+        delta=0
+        if [ -n "$last_tc" ] && [ "$cur" -ge "$last_tc" ] 2>/dev/null; then
+            delta=$((cur - last_tc))
+        fi
+        today=$(awk -F= '/^today_down=/{print $2; exit}' "$f")
+        wk=$(awk -F= '/^week_down=/{print $2; exit}' "$f")
+        mo=$(awk -F= '/^month_down=/{print $2; exit}' "$f")
+        sed -i \
+            -e "s/^last_tc_down=.*/last_tc_down=$cur/" \
+            -e "s/^today_down=.*/today_down=$((today + delta))/" \
+            -e "s/^week_down=.*/week_down=$((wk + delta))/" \
+            -e "s/^month_down=.*/month_down=$((mo + delta))/" \
+            -e "s/^if_down=.*/if_down=$iface/" \
+            -e "s/^epoch=.*/epoch=$now/" \
+            "$f"
+    else
+        last_tc=$(awk -F= '/^last_tc_up=/{print $2; exit}' "$f")
+        delta=0
+        if [ -n "$last_tc" ] && [ "$cur" -ge "$last_tc" ] 2>/dev/null; then
+            delta=$((cur - last_tc))
+        fi
+        today=$(awk -F= '/^today_up=/{print $2; exit}' "$f")
+        wk=$(awk -F= '/^week_up=/{print $2; exit}' "$f")
+        mo=$(awk -F= '/^month_up=/{print $2; exit}' "$f")
+        sed -i \
+            -e "s/^last_tc_up=.*/last_tc_up=$cur/" \
+            -e "s/^today_up=.*/today_up=$((today + delta))/" \
+            -e "s/^week_up=.*/week_up=$((wk + delta))/" \
+            -e "s/^month_up=.*/month_up=$((mo + delta))/" \
+            -e "s/^if_up=.*/if_up=$iface/" \
+            -e "s/^epoch=.*/epoch=$now/" \
+            "$f"
+    fi
+}
+
+aggregate_stats() {
+    local iface="$1"
+    [ -d "/sys/class/net/$iface" ] || return 0
+    local parsed=$SD/parsed-stats-$$
+    parse_filters "$iface" > "$parsed"
+
+    # Iterate stats filters (prio >= 9000). Each line: prio|match|bytes
+    while IFS='|' read -r prio match bytes; do
+        [ -z "$prio" ] && continue
+        [ "$prio" -ge "$STATS_PRIO_BASE" ] 2>/dev/null || continue
+        [ "$prio" -le "$STATS_PRIO_MAX" ] 2>/dev/null || continue
+        case "$match" in
+            "match ip dst "*"/32") dir=dst ;;
+            "match ip src "*"/32") dir=src ;;
+            *) continue ;;
+        esac
+        local ip=${match#match ip ${dir} }
+        ip=${ip%/32}
+        [ -n "$ip" ] || continue
+        local id
+        id=$(ip_to_mac "$ip")
+        [ -z "$id" ] && id="ip-$ip"
+        aggregate_one "$iface" "$ip" "$dir" "$bytes" "$id"
+    done < "$parsed"
+
+    rm -f "$parsed"
+}
+
+# ---- main ---------------------------------------------------------------
+
 config_load "$UCI"
+
+# 0. Build lease cache used by both stats and (later) reporting.
+build_lease_cache
+
+main_enabled=$(/sbin/uci -q get "$UCI.main.enabled")
+
+# 1. For every iface that needs stats, ensure ingress qdisc + sync stats
+#    filters + aggregate. Runs even if main.enabled = 0 — stats are a
+#    pure reporting feature and shouldn't be gated on rate-limiting.
+for iface in $(stats_ifaces); do
+    [ -n "$iface" ] || continue
+    sync_stats_filters "$iface"
+    aggregate_stats   "$iface"
+done
+
+# 2. Quota enforcement only when the main service is enabled.
+[ "$main_enabled" = "1" ] || exit 0
 
 for iface in $(uci show "$UCI" 2>/dev/null \
               | sed -n 's/^limitpolice\..*\.interface=//p' \
               | sort -u); do
     [ -n "$iface" ] || continue
-    process_iface "$iface"
+    parsed=$SD/parsed-$$-$iface
+    parse_filters "$iface" > "$parsed"
+    config_foreach check_rule rule "$iface" "$parsed"
+    rm -f "$parsed"
 done

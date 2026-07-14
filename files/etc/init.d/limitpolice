@@ -22,8 +22,15 @@ USE_PROCD=1     # procd runs the script as a managed service so we can
 LOG_PREFIX="limitpolice"
 PRIO_BASE=100   # filter priority base; our rules live in 100..199
 PRIO_MAX=199
+# stats filters live in a separate, high prio band so they never collide
+# with user rules. They are added lazily by limitpolice-quota-check (every
+# 5 min) for each active DHCP lease as a no-op counter (police rate 999gbit)
+# — see that script for the lifecycle.
+STATS_PRIO_BASE=9000
+STATS_PRIO_MAX=9999
 STATE_FILE="/var/run/limitpolice.filters"
 QDISC_STATE_FILE="/var/run/limitpolice.qdiscs"
+STATS_STATE_FILE="/var/run/limitpolice.stats"
 
 . /etc/functions.sh
 
@@ -136,14 +143,17 @@ ensure_ingress_qdisc() {
     fi
 }
 
-# remove all filters that we own (prio in [PRIO_BASE, PRIO_MAX]) on iface
+# remove all filters that we own on iface — both user-rule band (100..199)
+# and stats band (9000..9999). quota-check allocates stats prios so it can
+# rebuild them on next run; we just nuke the band here.
 clear_filters_on_iface() {
     local iface="$1"
     tc -s filter show dev "$iface" parent ffff: 2>/dev/null | \
         grep -oE "pref [0-9]+" | awk '{print $2}' | \
         while read -r p; do
-            [ "$p" -ge "$PRIO_BASE" ] && [ "$p" -le "$PRIO_MAX" ] && \
-                tc filter del dev "$iface" parent ffff: prio "$p" 2>/dev/null
+            { [ "$p" -ge "$PRIO_BASE"      ] && [ "$p" -le "$PRIO_MAX" ];      } || \
+            { [ "$p" -ge "$STATS_PRIO_BASE" ] && [ "$p" -le "$STATS_PRIO_MAX" ]; } || continue
+            tc filter del dev "$iface" parent ffff: prio "$p" 2>/dev/null
         done
 }
 
@@ -167,16 +177,26 @@ service_triggers() {
     procd_add_reload_trigger "limitpolice"
 }
 
-# Install cron entries for quota enforcement. Idempotent: rewrites only the
-# two lines we own, leaves any user crontab alone. The check runs every 5
-# minutes; the reset runs at 00:00 daily (clears counters and rebuilds
-# filters at their declared rate so any punitive 1kbit block is lifted).
+# Install cron entries for quota + stats. Idempotent: rewrites only the
+# lines we own, leaves any user crontab alone.
+#   */5 quota-check    — quota enforce + stats filter maintenance + stats aggregate
+#   3 0 * * *  daily   — clear today's stats buckets (offset 3min to dodge quota-reset)
+#   2 0 * * 1  weekly  — clear this week's stats buckets (Monday 00:02)
+#   1 0 1 * *  monthly — clear this month's stats buckets (1st 00:01)
+#   0 0 * * *  reset   — quota counter reset + service restart (lifts any 1kbit block)
 install_cron() {
     local f=/etc/crontabs/root
     [ -f "$f" ] || touch "$f"
-    sed -i '/limitpolice-quota-check/d; /limitpolice-quota-reset/d' "$f"
+    sed -i \
+        -e '/limitpolice-quota-check/d' \
+        -e '/limitpolice-quota-reset/d' \
+        -e '/limitpolice-stats-clear/d' \
+        "$f"
     cat >> "$f" <<'EOF'
 */5 * * * * /usr/sbin/limitpolice-quota-check >/dev/null 2>&1
+3 0 * * * /usr/sbin/limitpolice-stats-clear daily >/dev/null 2>&1
+2 0 * * 1 /usr/sbin/limitpolice-stats-clear weekly >/dev/null 2>&1
+1 0 1 * * /usr/sbin/limitpolice-stats-clear monthly >/dev/null 2>&1
 0 0 * * * /usr/sbin/limitpolice-quota-reset >/dev/null 2>&1
 EOF
     /etc/init.d/cron reload 2>/dev/null || /etc/init.d/cron restart 2>/dev/null
@@ -185,7 +205,11 @@ EOF
 remove_cron() {
     local f=/etc/crontabs/root
     [ -f "$f" ] || return 0
-    sed -i '/limitpolice-quota-check/d; /limitpolice-quota-reset/d' "$f"
+    sed -i \
+        -e '/limitpolice-quota-check/d' \
+        -e '/limitpolice-quota-reset/d' \
+        -e '/limitpolice-stats-clear/d' \
+        "$f"
     /etc/init.d/cron reload 2>/dev/null
 }
 
@@ -255,7 +279,10 @@ stop_service() {
         tc qdisc del dev "$iface" ingress 2>/dev/null && \
             log_msg info "removed ingress qdisc on $iface"
     done < "$QDISC_STATE_FILE"
-    rm -f "$STATE_FILE" "$QDISC_STATE_FILE"
+    rm -f "$STATE_FILE" "$QDISC_STATE_FILE" "$STATS_STATE_FILE"
+    # also clear the daily/weekly/monthly stats files — they're in /tmp so
+    # reboot already wipes them, but a clean stop should leave nothing.
+    rm -rf /tmp/limitpolice/stats
 }
 
 reload_service() {

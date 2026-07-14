@@ -29,6 +29,8 @@ define Package/luci-app-limitpolice/description
 	Lightweight per-device bandwidth policing using tc ingress police.
 	Compatible with hardware Flow Offloading, fullcon NAT and BBR.
 	No IFB, no HTB, no fq_codel, no Cake.
+	Includes a cron-driven per-device daily/weekly/monthly traffic report
+	read-only tab — no background daemon.
 endef
 
 define Build/Prepare
@@ -48,6 +50,7 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
 	$(INSTALL_DIR) $(1)/usr/sbin
 
@@ -58,11 +61,13 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/controller/limitpolice.lua $(1)/usr/lib/lua/luci/controller/
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/model/cbi/limitpolice.lua      $(1)/usr/lib/lua/luci/model/cbi/
 	$(INSTALL_DATA) ./files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua $(1)/usr/lib/lua/luci/model/cbi/
+	$(INSTALL_DATA) ./files/usr/lib/lua/luci/view/limitpolice_stats.htm     $(1)/usr/lib/lua/luci/view/
 
 	$(INSTALL_DATA) ./files/usr/share/luci/menu.d/luci-app-limitpolice.json $(1)/usr/share/luci/menu.d/
 
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-check  $(1)/usr/sbin/
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-reset  $(1)/usr/sbin/
+	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-stats-clear $(1)/usr/sbin/
 endef
 
 # Run once on the device after opkg install. Auto-enable + restart so the

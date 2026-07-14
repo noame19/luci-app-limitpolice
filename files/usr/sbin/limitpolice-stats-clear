@@ -1,0 +1,50 @@
+#!/bin/sh
+# /usr/sbin/limitpolice-stats-clear
+#
+# Clears one or more of the today / week / month byte buckets in every
+# /tmp/limitpolice/stats/<id> file. last_tc_* counters are deliberately
+# NOT touched — quota-check owns those as its running baseline.
+#
+# Cron entries (registered by /etc/init.d/limitpolice):
+#   3 0 * * *   daily
+#   2 0 * * 1   weekly
+#   1 0 1 * *   monthly
+#
+# Argument (optional, defaults to "all"):
+#   daily | weekly | monthly | all
+
+LOCK=/var/run/limitpolice/.lock
+STATS_DIR=/tmp/limitpolice/stats
+
+which=$1
+[ -z "$which" ] && which=all
+
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
+[ -d "$STATS_DIR" ] || exit 0
+
+case "$which" in
+    daily)
+        sed_args='-e s/^today_down=.*/today_down=0/ -e s/^today_up=.*/today_up=0/' ;;
+    weekly)
+        sed_args='-e s/^week_down=.*/week_down=0/ -e s/^week_up=.*/week_up=0/' ;;
+    monthly)
+        sed_args='-e s/^month_down=.*/month_down=0/ -e s/^month_up=.*/month_up=0/' ;;
+    all)
+        sed_args='-e s/^today_down=.*/today_down=0/ -e s/^today_up=.*/today_up=0/
+                 -e s/^week_down=.*/week_down=0/  -e s/^week_up=.*/week_up=0/
+                 -e s/^month_down=.*/month_down=0/ -e s/^month_up=.*/month_up=0/' ;;
+    *)
+        logger -t limitpolice-stats "unknown period: $which"
+        exit 1 ;;
+esac
+
+count=0
+for f in "$STATS_DIR"/*; do
+    [ -f "$f" ] || continue
+    # shellcheck disable=SC2086
+    sed -i $sed_args "$f" 2>/dev/null && count=$((count + 1))
+done
+
+logger -t limitpolice-stats "cleared $which buckets for $count device(s)"

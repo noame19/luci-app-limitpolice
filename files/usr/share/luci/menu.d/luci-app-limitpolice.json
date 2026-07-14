@@ -9,5 +9,16 @@
         "depends": {
             "acl": [ "access_ssh" ]
         }
+    },
+    "admin/network/limitpolice/stats": {
+        "title": "Traffic Report",
+        "order": 81,
+        "action": {
+            "type": "view",
+            "path": "limitpolice/stats"
+        },
+        "depends": {
+            "acl": [ "access_ssh" ]
+        }
     }
 }
