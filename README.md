@@ -15,8 +15,8 @@
 | # | 功能 | 触发方式 | 后台常驻 |
 |---|---|---|---|
 | 1 | **实时限速**：单设备 IP / MAC 上下行带宽封顶 | LuCI Save & Apply | ❌（procd reload） |
-| 2 | **每日配额**：累计流量超限自动降到 1 kbit 惩罚性断网 | cron 每 5 分钟检查 | ❌（cron） |
-| 3 | **流量统计报表**：今日 / 本周 / 本月各设备上下行 | cron 维护 + LuCI 按需渲染 | ❌（cron + 临时表） |
+| 2 | **每日配额**：累计流量超限自动降到 1 kbit 惩罚性断网 | 守护进程按间隔调度 | ✅（limitpoliced 占 ~300KB） |
+| 3 | **流量统计报表**：今日 / 本周 / 本月各设备上下行 | 守护进程自轮询 + 自动备份 | ✅（limitpoliced 顺序执行） |
 
 三个功能共享同一套 `tc u32 + police` 计数器，不引入 nftables / conntrack
 等新依赖，**不打开报表页面时整机零开销**。
@@ -71,23 +71,25 @@
              │ UCI /etc/config/limitpolice        │ 读 /tmp + /var/run
              ▼                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ /etc/init.d/limitpolice  （procd-managed，无自定义守护进程）              │
-│   start_service:  load_modules + apply_rule (user rules) + install_cron   │
-│   stop_service:   remove_cron  + clear_all_rules (清 100-199 和 9000-9999)│
+│ /etc/init.d/limitpolice  （procd-managed；启动唯一常驻进程 + tc 应用）   │
+│   start_service:  load_modules + restore_stats_backup + apply_rule       │
+│                   + flock 包住 tc 写 + procd_open_instance(limitpoliced) │
+│   stop_service:   flock + backup_stats_now + clear_all_rules             │
 │   reload_service: stop + start（UCI 变更自动触发）                       │
 ├──────────────────────────────────────────────────────────────────────────┤
-│ busybox crond                                                            │
-│   */5 * * * *   limitpolice-quota-check    ← 配额判定 + stats 同步       │
-│   3 0 * * *     limitpolice-stats-clear daily                            │
-│   2 0 * * 1     limitpolice-stats-clear weekly                           │
-│   1 0 1 * *     limitpolice-stats-clear monthly                          │
-│   0 0 * * *     limitpolice-quota-reset   （清 SNAP + restart 服务）     │
+│ /usr/sbin/limitpoliced  （由 procd 托管的唯一常驻守护进程，基础 sleep 10s）│
+│  主循环 (while true) 内部通过对比 Unix 时间戳，按需顺序调度以下任务：      │
+│  ▶ 每 stats_interval 秒:    执行 quota-check（tc 统计累加 + 配额判定）   │
+│  ▶ 每 backup_interval 秒:   执行 stats-backup（单线程打包 tar 备份至 Flash）│
+│  ▶ 每当检测到日期/周/月跨期:  在脚本内部执行 stats-clear，重置对应流量桶     │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ /usr/sbin/limitpolice-quota-check                                         │
 │   1. 读 /tmp/dhcp.leases → 构建 ip↔mac 缓存（写 /tmp/limitpolice.leases）│
 │   2. 懒加载 stats filter：prio 9000+ 段每个活跃 IP 占 2 个槽（dst/src）   │
+│      （仅限 DHCP 已知 IP，未知 IP 不建 filter 防爆池）                   │
 │   3. 解析 tc -s filter show → 累加 /tmp/limitpolice/stats/<MAC>         │
-│   4. 解析 /etc/config/limitpolice → 配额判定，超标 del+add police 1kbit  │
+│   4. 解析 /etc/config/limitpolice → 配额判定，超标 del+add police 速率   │
+│      （速率由 UCI main.quota_throttle_rate 控制，默认 1kbit）            │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ 内核 net/sched                                                            │
 │   tc qdisc ingress (ffff:) on <iface>                                     │
@@ -96,19 +98,21 @@
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 进程模型回答"零常驻"问题
+### 进程模型
 
-| 状态 | 内存 | CPU |
-|---|---|---|
-| 路由器运行中、未打开 LuCI | 0 额外 | 0 额外 |
-| 路由器运行中、打开 LuCI 主页面 | fork 一次 luci-index 渲染 | < 200ms |
-| 路由器运行中、打开报表页面 | fork 一次 template 渲染（无后台） | < 300ms |
-| 每 5 分钟 | fork quota-check 一次 | < 100ms 后退出 |
-| 每日 00:00 | 4 条 cron 错峰执行（间隔 1/2/3 秒） | 各 < 100ms |
+| 状态 | 内存 | CPU | 说明 |
+|---|---|---|---|
+| 路由器运行中、未打开 LuCI | ~300 KB (常驻) | 0% (Sleep 状态) | 只有唯一守护进程，无进程抖动 |
+| 路由器运行中、打开 LuCI 主页面 | + ~10 MB (luci-index) | < 200ms | fork 一次 luci-index 渲染 |
+| 路由器运行中、打开报表页面 | + ~10 MB (template render) | < 300ms | fork 一次 template 渲染 |
+| 达到 stats_interval 周期 | ~300 KB | < 2% (运行 ~50ms) | 顺序执行 tc 解析，无新进程 fork |
+| 达到 backup_interval 周期 | 短暂增加 ~100 KB | < 3% (运行 ~100ms) | 单线程打包 tar.gz，不伤闪存 |
+| 跨日子/周/月 00:00 节点 | ~300 KB | < 1% (运行 ~10ms) | 脚本内部直接重置内存文本，无惊群效应 |
 
-唯一常驻的进程是 **procd 监控的 limitpolice init 脚本**——但它本身不进
-循环，只是 `start_service` 跑一次然后等 procd 信号；没有任何 while /
-sleep 死循环。
+唯一常驻的进程就是 **procd 拉起的 limitpoliced**。它本体就是 `while
+true; sleep 10` 的小循环，每次醒来顺序检查 stats_interval / backup_interval /
+跨期触发器——单线程串行执行，天然免疫 rtnetlink 锁死和 race condition，
+不再依赖 flock。
 
 ### 文件清单
 
@@ -116,7 +120,7 @@ sleep 死循环。
 files/
 ├── etc/
 │   ├── config/limitpolice                    # UCI 默认配置
-│   ├── init.d/limitpolice                    # procd 脚本（含 cron 管理）
+│   ├── init.d/limitpolice                    # procd 脚本 + flock 互斥
 │   └── uci-defaults/99-limitpolice           # postinst hook 占位
 └── usr/
     ├── lib/lua/luci/
@@ -127,9 +131,10 @@ files/
     │   └── view/
     │       └── limitpolice_stats.htm         # 只读报表模板（不打开不加载）
     ├── sbin/
-    │   ├── limitpolice-quota-check           # */5 cron：配额 + stats 聚合
-    │   ├── limitpolice-quota-reset           # 0 0 * * * cron：清配额 + restart
-    │   └── limitpolice-stats-clear           # 错峰 cron：清 stats 桶
+    │   ├── limitpoliced                      # 常驻守护：sleep 10 + 调度所有定时任务
+    │   ├── limitpolice-quota-check           # 守护按 stats_interval 调用：配额 + stats 聚合
+    │   ├── limitpolice-stats-backup          # 守护按 backup_interval 调用：tar 打包 flash
+    │   └── limitpolice-stats-clear           # 守护按跨期触发：清 stats 桶
     └── share/luci/menu.d/
         └── luci-app-limitpolice.json         # 菜单（含 stats tab）
 ```
@@ -142,24 +147,27 @@ files/
 | `/var/run/limitpolice.stats` | quota-check 记录：stats filter 槽位分配 | 运行时，重启清 |
 | `/var/run/limitpolice/quota` | 配额 SNAP：`iface:target:dir total last_tc` | 运行时，00:00 清 |
 | `/tmp/limitpolice.leases` | quota-check 缓存的 DHCP 解析结果 | 5 分钟有效 |
-| `/tmp/limitpolice/stats/<id>` | 单设备 stats 累加器，`id=mac` 或 `ip-X.X.X.X` | reboot 清零 |
-| `/etc/crontabs/root` | 我们管理的 5 行（其它用户条目不动） | 永久 |
+| `/tmp/limitpolice/stats/<id>` | 单设备 stats 累加器，`id=mac` 或 `ip-X.X.X.X` | reboot 清零（active reboot 由 flash tar 恢复） |
+| `/etc/limitpolice/stats_backup.tar.gz` | 单文件打包备份 | 永久（每次 backup_interval 覆盖写） |
 
 ### 关键设计决策
 
 | 决策 | 选择 | 理由 |
 |---|---|---|
-| 进程模型 | procd + cron，不写 while 循环 | 用户硬性要求 + 64 MB RAM |
+| 进程模型 | procd + 唯一 limitpoliced 常驻守护（while true + sleep 10s） | ~300 KB 常驻换：单线程串行无 race、网页可调间隔、无 crontab 污染 |
 | 限速内核机制 | `tc ingress police` | 不抢 Flow Offload / fullcon / BBR |
-| 配额触发 | cron 5 分钟 + tc 字节 delta | 弱 CPU 不做实时算 |
-| 配额惩罚 | `tc filter del` + `add ... police rate 1kbit` | 一条命令替换，无 race |
-| 配额解封 | 每日 00:00 service restart | UCI 重建 filter，1 kbit 自然消失 |
+| 配额触发 | 守护进程自轮询，间隔（`stats_interval`）在网页可调 | 默认 300s，调低更精确但增加 CPU；调高更省电 |
+| 配额惩罚 | `tc filter del` + `add ... police rate N kbit` | 一条命令替换，无 race；速率由 UCI `quota_throttle_rate` 控制 |
+| 配额解封 | 守护进程自检测跨日 + 00:00 触发 `init.d reload` | 不依赖 cron 表达式，重建 filter 让惩罚自然消失 |
+| 周期清零 | 守护进程 `date +%Y%m%d` 比对 LAST_DAY/WEEK/MONTH 文件 | 周/月各用单独 last 文件防重复触发 |
 | 统计计数器 | prio 9000+ 独立 filter，`police rate 999gbit` | 与用户规则不冲突，pure counter |
-| 统计懒加载 | quota-check 首次见 IP 才 `tc filter add` | boot 阶段 0 开销 |
+| 统计懒加载 | quota-check 首次见 DHCP 已知 IP 才 `tc filter add` | boot 阶段无 stats 开销；未知 IP 拒绝建 filter 防爆池 |
 | 统计按 MAC | DHCP 已知 MAC；未知用 `ip-X.X.X.X` | 用户原话"按 MAC 区分" |
-| 统计存储 | `/tmp/limitpolice/stats/<MAC>`（tmpfs） | 不写 flash，UBIFS 寿命 |
+| 统计存储 | `/tmp/limitpolice/stats/<MAC>`（tmpfs）+ flash tar 备份 | 内存读写不伤 UBIFS；active reboot 由 init.d start 时自动恢复 |
+| 持久化路径 | `tar czf /etc/limitpolice/stats_backup.tar.gz` | 单文件覆盖写，不累积；守护按 `backup_interval` + init.d stop 时各打一次 |
+| 持久化 tradeoff | active reboot 100% 不丢；power loss 最多丢一个 backup_interval 周期 | 防止低频断电去毁坏闪存寿命，不划算 |
 | 报表 UI | `luci.template.render`（非 CBI） | 只读报表，CBI 太重 |
-| cron 错峰 | `0`/`1`/`2`/`3` 秒偏移 | 错开 quota-reset 触发点 + flock 互斥 |
+| 单线程顺序 | 守护进程内 task 全部串行触发 | 天然免疫 rtnetlink 锁死和 quota-check / init.d reload 之间的 race condition，彻底取代 cron 错峰 + flock |
 | key by `<iface>:<target>:<dir>` | 不是 prio | prio 在 restart 后会重排 |
 
 ## 兼容版本矩阵
@@ -257,7 +265,10 @@ ssh root@router '/etc/init.d/limitpolice start'
 
 - `Enable`：单条开关
 - `Interface`：物理接口（`eth0`、`eth1`）或桥接接口（`br-lan`）。
-  从 `/sys/class/net` 自动拉
+  从 `/sys/class/net` 自动拉。**iface 必须和下面的 Direction 配对**：
+  - `dst` → WAN 侧 iface（`wan` / `pppoe-wan` / `eth1` 等下行包先到达的口）
+  - `src` → LAN 侧 iface（`br-lan` / `eth0` / `wlan0` 等上行包先到达的口）
+  - 配错 init.d 会拒绝加载并在 syslog 报警告（rule 静默失效）
 - `Match by`：按 IP/CIDR 或按 MAC 地址
 - `Target`：目标地址（IP `192.168.1.100/32` 或 MAC `aa:bb:cc:dd:ee:ff`）
 - `Direction`：
@@ -272,8 +283,11 @@ ssh root@router '/etc/init.d/limitpolice start'
 ### 2. 每日配额
 
 - 设 `quota=10, quota_unit=GB` → 当日累计超过 10 GB 时，quota-check 把
-  该规则的 filter 替换成 `police rate 1kbit`，该设备相当于断网
-- 每日 00:00 cron 自动重启服务，所有 filter 按 UCI 声明速率重建，惩罚
+  该规则的 filter 替换成 `police rate N kbit`，该设备相当于断网
+  （N = UCI `main.quota_throttle_rate`，默认 1kbit；调到 16/64 让
+  基础 IM 文字可过）
+- 守护进程每日 00:00 自检测到跨日 + 00:00 时，自动触发
+  `/etc/init.d/limitpolice reload`，所有 filter 按 UCI 声明速率重建，惩罚
   自动解除
 - quota key 是 `<iface>:<target>:<dir>`，prio 在 restart 后会变，所以不
   能用 prio 做 key
@@ -302,17 +316,31 @@ ssh root@router '/etc/init.d/limitpolice start'
 
 ```bash
 # 限 iphone-15（IP 192.168.1.105）下行 5 Mbps + 每日 10 GB 配额
+# 注意：下行（dst）必须配 WAN 侧 iface，不能用 br-lan
 uci add limitpolice rule
 uci set limitpolice.@rule[-1].enabled='1'
-uci set limitpolice.@rule[-1].interface='br-lan'
+uci set limitpolice.@rule[-1].interface='wan'           # 或 pppoe-wan / eth1
 uci set limitpolice.@rule[-1].target_type='ip'
 uci set limitpolice.@rule[-1].target='192.168.1.105/32'
-uci set limitpolice.@rule[-1].direction='dst'
+uci set limitpolice.@rule[-1].direction='dst'           # 下行
 uci set limitpolice.@rule[-1].rate='5'
 uci set limitpolice.@rule[-1].unit='Mbps'
 uci set limitpolice.@rule[-1].quota='10'
 uci set limitpolice.@rule[-1].quota_unit='GB'
 uci set limitpolice.@rule[-1].comment='iphone-15'
+uci commit limitpolice
+/etc/init.d/limitpolice restart
+
+# 限 macbook（MAC aa:bb:cc:dd:ee:ff）上行 2 Mbps（无配额）
+uci add limitpolice rule
+uci set limitpolice.@rule[-1].enabled='1'
+uci set limitpolice.@rule[-1].interface='br-lan'       # 上行必须配 LAN
+uci set limitpolice.@rule[-1].target_type='mac'
+uci set limitpolice.@rule[-1].target='aa:bb:cc:dd:ee:ff'
+uci set limitpolice.@rule[-1].direction='src'           # 上行
+uci set limitpolice.@rule[-1].rate='2'
+uci set limitpolice.@rule[-1].unit='Mbps'
+uci set limitpolice.@rule[-1].comment='macbook'
 uci commit limitpolice
 /etc/init.d/limitpolice restart
 
@@ -372,13 +400,23 @@ opkg install kmod-sched kmod-sched-core kmod-sched-flower
 3. **总带宽判断**：插件不自动检测带宽。`Rate` 字段是你手动填的上限
    —— 设错会导致丢包过多（太小）或限不住（太大）。
 4. **多 wan/多 wan6 不支持**：插件假设单 WAN + 单 LAN 桥。
-5. **统计 reboot 清零**：`/tmp/limitpolice/stats/` 在 tmpfs，路由器重
-   启会重新基线。设计取舍：不写 flash 免 UBIFS 寿命问题。
-6. **配额统计精度**：cron 每 5 分钟一次，最坏情况超额 5 分钟后才被
-   触发断网（弱 CPU 上故意做的取舍，避免 `tc -s filter show` 高频查询）。
+5. **异常断电会丢最多一个 backup_interval 周期的增量**：
+   `/tmp/limitpolice/stats/` 在 tmpfs，守护进程按 `backup_interval`
+   定时打 tar 备份到 flash；active reboot（网页 Save & Apply / 升级 /
+   `reboot` 命令）由 init.d stop 时主动打一次保证不丢；**异常断电**
+   （拔电源、kernel panic）最多丢过去一个 backup_interval 周期（默认
+   1 小时）的 delta。Tradeoff：防止低频断电去毁坏闪存寿命不划算，
+   真实家庭场景停电是低频事件。
+6. **配额统计精度**：守护进程按 `stats_interval`（默认 300s）触发
+   quota-check，最坏情况超额 `stats_interval` 秒后才被判定。弱 CPU
+   上故意不做实时算，避免 `tc -s filter show` 高频查询。
 7. **stats filter 上限**：prio 9000-9999 共 1000 槽位，按每设备 2 个
    filter（src+dst）算支持 ~500 台设备。超过会在 syslog 报
-   `stats prio band exhausted`。
+   `stats prio band exhausted`。**且 stats filter 仅限 DHCP 已知 IP**
+   —— 未知 IP 拒绝建 filter 防恶意扫描 / 随机 MAC 爆池。
+8. **iface 与 direction 必须配对**：dst 配 WAN（如 wan / pppoe-wan /
+   eth1），src 配 LAN（如 br-lan / eth0）。配错 init.d 会拒绝加载并
+   在 syslog 报警告（rule 会 silently 失效、浪费 prio 槽位）。
 
 ## 调试
 
@@ -402,8 +440,11 @@ watch -n 1 'tc -s filter show dev br-lan parent ffff:'
 ls /tmp/limitpolice/stats/
 cat /tmp/limitpolice/stats/aa:bb:cc:dd:ee:ff
 
-# 手动清空某周期（模拟 cron 触发）
+# 手动清空某周期（守护进程本来每天/周/月会自动清；这里手动模拟）
 /usr/sbin/limitpolice-stats-clear daily
+
+# 查看守护进程状态（最后一次 stats / backup 时间戳在 /var/run/limitpolice/）
+ls /var/run/limitpolice/
 
 # 临时停掉所有限速（看是否解决问题）
 /etc/init.d/limitpolice stop
