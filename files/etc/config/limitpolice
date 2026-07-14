@@ -1,0 +1,14 @@
+config limitpolice 'main'
+	option enabled '0'
+	option verbose '1'
+
+# Example rule — edit / add via LuCI, or duplicate this block per device.
+#config rule
+#	option enabled '0'
+#	option interface 'br-lan'
+#	option target_type 'ip'
+#	option target '192.168.1.100/32'
+#	option direction 'dst'
+#	option rate '10'
+#	option unit 'Mbps'
+#	option comment 'example device'

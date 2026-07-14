@@ -1,0 +1,34 @@
+#!/bin/sh
+# First-boot defaults for luci-app-limitpolice.
+# Runs once after install (uci-defaults are auto-deleted by OpenWrt).
+
+# Ensure /etc/config/limitpolice exists. If absent (clean install on an
+# OpenWrt build that ships our files/ tree but no pre-cooked config),
+# drop in a minimal default.
+if [ ! -f /etc/config/limitpolice ]; then
+    cat > /etc/config/limitpolice <<'EOF'
+config limitpolice 'main'
+	option enabled '0'
+	option verbose '1'
+EOF
+fi
+
+# Register LuCI menu entry (no-op if already present).
+mkdir -p /usr/share/luci/menu.d
+cat > /usr/share/luci/menu.d/luci-app-limitpolice.json <<'EOF' 2>/dev/null
+{
+    "admin/network/limitpolice": {
+        "title": "Limit Police",
+        "order": 80,
+        "action": {
+            "type": "view",
+            "path": "limitpolice"
+        },
+        "depends": {
+            "acl": [ "access_ssh" ]
+        }
+    }
+}
+EOF
+
+exit 0
