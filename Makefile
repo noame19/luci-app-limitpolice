@@ -73,6 +73,7 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-quota-check  $(1)/usr/sbin/
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpoliced             $(1)/usr/sbin/
 	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-stats-clear $(1)/usr/sbin/
+	$(INSTALL_BIN)  ./files/usr/sbin/limitpolice-stats-backup $(1)/usr/sbin/
 endef
 
 # Run once on the device after opkg install. Auto-enable + restart so the

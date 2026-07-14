@@ -168,6 +168,31 @@ clear_all_rules() {
     done
 }
 
+# Restore the per-device stats accumulator files from the on-flash tarball.
+# Called from start_service() before the daemon comes up. Idempotent: no
+# action when /etc/limitpolice/stats_backup.tar.gz is missing.
+# Tradeoff: protects against active reboot (LuCI Save & Apply, upgrade,
+# "reboot" from CLI). Does NOT protect against power loss — the most
+# recent quota-check cycle's delta is gone if the box dies between
+# backup_interval cycles. README documents this.
+restore_stats_backup() {
+    local archive=/etc/limitpolice/stats_backup.tar.gz
+    [ -f "$archive" ] || return 0
+    mkdir -p /tmp/limitpolice 2>/dev/null || return 1
+    if tar xzf "$archive" -C /tmp/limitpolice 2>/dev/null; then
+        log_msg info "restored stats backup from $archive"
+    else
+        log_msg warn "stats backup present but tar extract failed"
+    fi
+}
+
+# Snapshot the per-device stats accumulators to flash. Called from
+# stop_service() so a graceful shutdown or "Save & Apply" always leaves
+# a fresh backup. Failures are non-fatal — old backup is kept.
+backup_stats_now() {
+    /usr/sbin/limitpolice-stats-backup 2>/dev/null
+}
+
 # Tell procd to watch /etc/config/limitpolice for changes. On any
 # modification (LuCI Save & Apply, `uci set` from SSH, manual `vi`, …)
 # procd will invoke reload_service() which re-syncs UCI → tc.
@@ -184,6 +209,12 @@ start_service() {
 
     local main_enabled
     config_get_bool main_enabled main enabled 0
+
+    # Restore stats accumulator files from the previous backup before
+    # anything else touches /tmp/limitpolice/stats. Even if the user has
+    # no rules today the daemon still needs the counters alive so quota
+    # deltas resume from yesterday's baseline.
+    restore_stats_backup
 
     # Walk user rules first so the existing tc filters are in place before
     # the daemon wakes up and starts reading tc -s filter show. If the
@@ -241,6 +272,8 @@ apply_rule() {
 }
 
 stop_service() {
+    # Snapshot stats before wiping — this is the active-reboot safety net.
+    backup_stats_now
     clear_all_rules
     # remove ingress qdiscs only if we added them
     [ -f "$QDISC_STATE_FILE" ] && while read -r iface; do

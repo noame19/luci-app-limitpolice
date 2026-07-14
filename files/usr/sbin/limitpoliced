@@ -29,6 +29,7 @@ STATE_DIR=/var/run/limitpolice
 mkdir -p "$STATE_DIR" 2>/dev/null
 
 LAST_QUOTA_FILE=$STATE_DIR/last_quota
+LAST_BACKUP_FILE=$STATE_DIR/last_backup
 LAST_DAY_FILE=$STATE_DIR/last_day
 LAST_WEEK_FILE=$STATE_DIR/last_week
 LAST_MONTH_FILE=$STATE_DIR/last_month
@@ -46,10 +47,13 @@ read_uci() {
 # 在 LuCI 改了之后下一次循环就生效）
 get_intervals() {
     STATS_INTERVAL=$(read_uci stats_interval 300)
+    BACKUP_INTERVAL=$(read_uci backup_interval 3600)
     # sanitize: 只接受正整数
     case "$STATS_INTERVAL" in ''|*[!0-9]*) STATS_INTERVAL=300 ;; esac
-    # 保护下限：10s（防用户设 1s 烧 CPU）
+    case "$BACKUP_INTERVAL" in ''|*[!0-9]*) BACKUP_INTERVAL=3600 ;; esac
+    # 保护下限：10s / 60s（防用户设 1s 烧 CPU 或频繁写 flash）
     [ "$STATS_INTERVAL" -lt 10 ] && STATS_INTERVAL=10
+    [ "$BACKUP_INTERVAL" -lt 60 ] && BACKUP_INTERVAL=60
 }
 
 # should_run <last_file> <interval>  →  返回 0 表示"该跑了"，并刷新 last_file
@@ -72,6 +76,11 @@ should_run() {
 do_quota_check() {
     /usr/sbin/limitpolice-quota-check >/dev/null 2>&1
     log "quota-check done"
+}
+
+do_backup() {
+    /usr/sbin/limitpolice-stats-backup >/dev/null 2>&1
+    log "stats-backup done"
 }
 
 do_clear() {
@@ -134,18 +143,23 @@ check_crossings() {
 
 cleanup() {
     log "shutting down"
-    rm -f "$LAST_QUOTA_FILE" "$LAST_DAY_FILE" "$LAST_WEEK_FILE" "$LAST_MONTH_FILE"
+    rm -f "$LAST_QUOTA_FILE" "$LAST_BACKUP_FILE" \
+          "$LAST_DAY_FILE" "$LAST_WEEK_FILE" "$LAST_MONTH_FILE"
     exit 0
 }
 trap cleanup TERM INT
 
-log "started (sleep 10s, stats_interval=${STATS_INTERVAL:-300})"
+log "started (sleep 10s, stats_interval=${STATS_INTERVAL:-300}, backup_interval=${BACKUP_INTERVAL:-3600})"
 
 while true; do
     get_intervals
 
     if should_run "$LAST_QUOTA_FILE" "$STATS_INTERVAL"; then
         do_quota_check
+    fi
+
+    if should_run "$LAST_BACKUP_FILE" "$BACKUP_INTERVAL"; then
+        do_backup
     fi
 
     check_crossings

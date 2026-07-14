@@ -1,0 +1,48 @@
+#!/bin/sh
+# /usr/sbin/limitpolice-stats-backup
+#
+# limitpoliced 按 UCI main.backup_interval 调用一次：
+#   tar czf /etc/limitpolice/stats_backup.tar.gz -C /tmp/limitpolice stats/
+#
+# 设计要点：
+#   1. 单次写入 = 一次 tar 打包几十个小文件，对 flash（UBIFS）寿命友好
+#      比散落 cp 几百次低两个数量级
+#   2. 写入位置 /etc/limitpolice/stats_backup.tar.gz 是单文件覆盖写，
+#      不累积，不膨胀
+#   3. start_service 自动恢复、stop_service 自动备份，
+#      所以 reboot + 主动重启（网页 Save & Apply / 升级固件）数据不丢
+#   4. 异常断电不保护：仅在主动 shutdown 时有完整 snapshot
+#      —— README 显式声明这是 tradeoff，换 UBIFS 寿命
+#
+# 锁：flock 复用 quota-check 的 /var/run/limitpolice/.lock，
+# 避免与 quota-check 同时读写 /tmp/limitpolice/stats/ 撞车。
+
+LOCK=/var/run/limitpolice/.lock
+STATS_DIR=/tmp/limitpolice/stats
+BACKUP_DIR=/etc/limitpolice
+BACKUP_FILE=$BACKUP_DIR/stats_backup.tar.gz
+
+exec 9>"$LOCK"
+flock -n 9 || exit 0
+
+[ -d "$STATS_DIR" ] || exit 0
+
+# 没有任何 stats 文件就别浪费一次 flash 写入
+count=$(find "$STATS_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)
+[ "$count" -gt 0 ] || exit 0
+
+mkdir -p "$BACKUP_DIR" 2>/dev/null || {
+    logger -t limitpolice-backup "cannot mkdir $BACKUP_DIR"
+    exit 1
+}
+
+# 写到 .tmp 然后原子 rename —— 如果中途断电不会留下半截文件
+tmp="${BACKUP_FILE}.tmp.$$"
+if tar czf "$tmp" -C /tmp/limitpolice stats/ 2>/dev/null; then
+    mv "$tmp" "$BACKUP_FILE"
+    logger -t limitpolice-backup "wrote $BACKUP_FILE ($count device(s))"
+else
+    rm -f "$tmp"
+    logger -t limitpolice-backup "tar failed, keeping previous backup"
+    exit 1
+fi

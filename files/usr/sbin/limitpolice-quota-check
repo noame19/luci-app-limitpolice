@@ -121,14 +121,21 @@ quota_bytes() {
     esac
 }
 
-# Replace one filter with a 1 kbit police. tc -s filter show is queried
+# Replace one filter with a low-rate police. tc -s filter show is queried
 # again (cheap) to find the live prio for this rule's match.
+# The throttle rate is read from UCI main.quota_throttle_rate (default 1
+# kbit). Set higher (e.g. 16 kbit = 2 KB/s) if you want basic IM text
+# to keep flowing instead of a hard wall.
 throttle_rule() {
     local iface="$1" rule="$2"
-    local target dir match prio
+    local target dir match prio throttle_kbit
     config_get target "$rule" target      ""
     config_get dir    "$rule" direction   "dst"
     match="match ip $dir $target"
+
+    throttle_kbit=$(uci -q get "$UCI.main.quota_throttle_rate" 2>/dev/null)
+    case "$throttle_kbit" in ''|*[!0-9]*) throttle_kbit=1 ;; esac
+    [ "$throttle_kbit" -lt 1 ] && throttle_kbit=1
 
     prio=$(tc -s filter show dev "$iface" parent ffff: 2>/dev/null \
         | awk -v m="$match" '
@@ -142,8 +149,8 @@ throttle_rule() {
     tc filter del dev "$iface" parent ffff: prio "$prio" 2>/dev/null
     tc filter add dev "$iface" parent ffff: protocol ip \
         prio "$prio" u32 $match \
-        police rate 1kbit burst 4k mtu 12k drop flowid :1 2>/dev/null
-    log "throttled $target on $iface (prio $prio, daily quota exceeded)"
+        police rate ${throttle_kbit}kbit burst 4k mtu 12k drop flowid :1 2>/dev/null
+    log "throttled $target on $iface (prio $prio, daily quota exceeded → ${throttle_kbit} kbit)"
 }
 
 check_rule() {
