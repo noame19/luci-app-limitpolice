@@ -1,6 +1,14 @@
 config limitpolice 'main'
 	option enabled '0'
 	option verbose '1'
+	# Daemon scheduling (consumed by /usr/sbin/limitpoliced every loop tick).
+	# Lower = more accurate timing + higher CPU + flash wear.
+	option stats_interval '300'
+	option backup_interval '3600'
+	# Rate (kbit) the offending filter is dropped to when daily quota
+	# is exceeded. 1 kbit = hard wall (default). Raise to 16-64 to let
+	# basic IM text through.
+	option quota_throttle_rate '1'
 
 # Example rule — edit / add via LuCI, or duplicate this block per device.
 #config rule

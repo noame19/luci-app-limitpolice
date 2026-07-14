@@ -78,8 +78,8 @@ local r_q = s:option(Value, "quota", translate("Daily quota (0 = off)"))
 r_q.datatype = "uinteger"
 r_q.default  = "0"
 r_q.placeholder = "0"
-r_q.description = translate("When exceeded, this device's filter is dropped to "
-    .. "<code>1 kbit</code> until the next 00:00 reset. "
+r_q.description = translate("When exceeded, this device's filter is dropped to the "
+    .. "throttle rate configured in the main section until the next 00:00 reset. "
     .. "Counted from <code>tc -s filter show</code> bytes.")
 
 local r_qu = s:option(ListValue, "quota_unit", translate("Quota unit"))

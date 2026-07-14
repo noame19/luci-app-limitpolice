@@ -65,6 +65,31 @@ en.rmempty = false
 en.default = "0"
 en.description = translate("When enabled, rules below are pushed via <code>/etc/init.d/limitpolice</code>.")
 
+-- Daemon scheduling knobs (consumed by /usr/sbin/limitpoliced)
+local si = main:option(Value, "stats_interval", translate("Stats / quota poll interval (seconds)"))
+si.datatype = "uinteger"
+si.default  = "300"
+si.placeholder = "300"
+si.description = translate("How often the daemon runs <code>limitpolice-quota-check</code>. "
+    .. "Minimum 10s. 5 minutes (300) is the safe default on weak CPUs.")
+
+local bi = main:option(Value, "backup_interval", translate("Stats archive interval (seconds)"))
+bi.datatype = "uinteger"
+bi.default  = "3600"
+bi.placeholder = "3600"
+bi.description = translate("How often the daemon runs <code>limitpolice-stats-backup</code> "
+    .. "(single tar.gz write to <code>/etc/limitpolice/</code>). "
+    .. "Minimum 60s. 1 hour (3600) is the safe default — protects against active "
+    .. "reboot only; power loss can lose up to one interval.")
+
+local qtr = main:option(Value, "quota_throttle_rate", translate("Quota throttle rate (kbit)"))
+qtr.datatype = "uinteger"
+qtr.default  = "1"
+qtr.placeholder = "1"
+qtr.description = translate("Rate the offending filter is dropped to when a device's daily "
+    .. "quota is exceeded. <code>1</code> = hard wall (default). Raise to "
+    .. "<code>16</code> or <code>64</code> to keep basic IM text flowing.")
+
 -- Service action buttons ------------------------------------------------
 local actions = main:option(DummyValue, "_actions", translate("Service control"))
 function actions.cfgvalue()
