@@ -242,6 +242,10 @@ service_triggers() {
 
 start_service() {
     load_modules
+    # /var/run is a tmpfs in OpenWrt; subdirectories are NOT auto-created
+    # at boot. ensure_ingress_qdisc, flock on .lock, and STATE_FILE all
+    # live under here, so create the namespace first.
+    mkdir -p /var/run/limitpolice 2>/dev/null
     : > "$STATE_FILE"
     : > "$QDISC_STATE_FILE"
 
@@ -340,6 +344,7 @@ apply_rule() {
 
 stop_service() {
     # Acquire flock so we never race quota-check's stats filter rebuild.
+    mkdir -p /var/run/limitpolice 2>/dev/null
     exec 8>"$LOCK_FILE" 2>/dev/null
     flock -x -w 10 8 || {
         log_msg err "cannot acquire $LOCK_FILE — quota-check still running?"
