@@ -61,4 +61,17 @@ define Package/luci-app-limitpolice/install
 	$(INSTALL_DATA) ./files/usr/share/luci/menu.d/luci-app-limitpolice.json $(1)/usr/share/luci/menu.d/
 endef
 
+# Run once on the device after opkg install. Auto-enable + restart so the
+# user does not have to SSH in. Skip during chroot / ImageBuilder builds
+# (IPKG_INSTROOT is non-empty in those contexts → we are running on the
+# host, not on a real router, so enabling services is meaningless).
+define Package/luci-app-limitpolice/postinst
+#!/bin/sh
+[ -z "$${IPKG_INSTROOT}" ] && {
+    /etc/init.d/limitpolice enable
+    /etc/init.d/limitpolice restart
+}
+exit 0
+endef
+
 $(eval $(call BuildPackage,luci-app-limitpolice))
