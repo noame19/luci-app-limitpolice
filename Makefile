@@ -17,8 +17,11 @@ define Package/luci-app-limitpolice
 	CATEGORY:=LuCI
 	SUBMENU:=3. Applications
 	TITLE:=Per-Device Bandwidth Policing (tc ingress police)
-	DEPENDS:=+kmod-sched-act-police +kmod-sched-core \
-		+kmod-sched-flower +tc
+	# kmod-sched provides CONFIG_NET_ACT_POLICE (the `police` tc action) plus
+	# the rest of "extra traffic schedulers" (PIE / ACT_IPT / ACT_PEDIT).
+	# kmod-sched-core provides sch_ingress + cls_u32 (the default classifier).
+	# kmod-sched-flower provides cls_flower (alternative classifier, optional).
+	DEPENDS:=+kmod-sched +kmod-sched-core +kmod-sched-flower +tc
 	PKGARCH:=all
 endef
 
