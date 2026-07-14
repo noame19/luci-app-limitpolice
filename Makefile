@@ -29,8 +29,13 @@ define Package/luci-app-limitpolice/description
 	Lightweight per-device bandwidth policing using tc ingress police.
 	Compatible with hardware Flow Offloading, fullcon NAT and BBR.
 	No IFB, no HTB, no fq_codel, no Cake.
-	Includes a cron-driven per-device daily/weekly/monthly traffic report
-	read-only tab — no background daemon.
+
+	Three features in one tiny package:
+	  1. Real-time per-device rate limit (IP or MAC, downlink / uplink)
+	  2. Per-device daily traffic quota with punitive 1 kbit block on
+	     overflow (auto-lifted at 00:00 by service restart)
+	  3. Read-only daily / weekly / monthly traffic report tab — backed
+	     by cron-driven per-IP counter filters, no background daemon
 endef
 
 define Build/Prepare
