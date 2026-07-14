@@ -73,33 +73,61 @@
 
 ## 安装
 
+### 关于"1 个 ipk 跨所有 OpenWrt 版本"
+
+本插件是纯 Lua + shell，`Makefile` 声明 `LUCI_PKGARCH:=all`——**ipk 内
+容本身不依赖具体架构或版本**。所以 GitHub Actions 按架构 build 的每个
+`.ipk`，只要路由器 CPU 架构对（OpenWrt 编译时的 `CONFIG_TARGET`），就
+能装在 18.06 / 19.07 / 21.02 / 22.03 / 23.05 / 24.10 **任意一个版本**
+上。opkg 装的时候会自动去拉对应你路由器内核版本的 `kmod-sched-*` 依赖
+包，**不需要**手动 clone OpenWrt 源码编译。
+
 ### 方式 A：预编译 `.ipk`（推荐新手）
 
-从 [Releases](../../releases) 下载和你路由器架构匹配的 `.ipk`：
+每个 Release 发布 **3 个 `.ipk`**（按 CPU 架构），对应 3 个目标架构：
+
+| 架构（ipk 包名后缀） | 典型路由器 |
+|---|---|
+| `x86_64` | x86_64 软路由 / 虚拟机 / `armvirt-64`（EFI） |
+| `mipsel_24kc` | MediaTek MT7621 / MT7628 / RT305x（ramips 系列，弱 CPU 经典机型） |
+| `aarch64_cortex-a53` | MediaTek Filogic（MT7981/86/88）、armvirt 64 位 |
+
+从 [Releases](../../releases) 选你路由器架构对应的 `.ipk`：
 
 ```bash
 opkg update
-opkg install luci-app-limitpolice_*.ipk
+opkg install luci-app-limitpolice_*.ipk   # 任一兼容版本都能装
 ```
 
-如果提示缺依赖：
+如果提示缺依赖（极简固件可能没有）：
 
 ```bash
-opkg install kmod-sched-act-police kmod-sched-core
+opkg install kmod-sched-act-police kmod-sched-core kmod-sched-flower
 opkg install luci-app-limitpolice_*.ipk
 ```
 
-### 方式 B：OpenWrt SDK 自编译
+### 方式 B：GitHub Actions 编译（不需要本地工具链）
+
+1. Fork 本仓库
+2. 进入 **Actions → Build IPK → Run workflow**
+3. 等 ~10 分钟，在 *Summary → Artifacts* 下载对应你路由器架构的 `.ipk`
+
+### 方式 C：OpenWrt SDK 自编译（开发者）
 
 ```bash
 git clone https://github.com/yourname/luci-app-limitpolice.git
 cd luci-app-limitpolice
 cp -r . /path/to/openwrt-sdk/package/luci-app-limitpolice/
+cd /path/to/openwrt-sdk
+./scripts/feeds update -a
+./scripts/feeds install -a
+echo "CONFIG_PACKAGE_luci-app-limitpolice=m" >> .config
+make defconfig
 make package/luci-app-limitpolice/compile V=s
-# 产物在 bin/packages/<arch>/luci-app-limitpolice_*.ipk
+# 产物在 bin/packages/<你的架构>/luci-app-limitpolice_*.ipk
 ```
 
-### 方式 C：本地源码直接装（开发模式）
+### 方式 D：本地源码直接装（开发模式）
 
 ```bash
 git clone https://github.com/yourname/luci-app-limitpolice.git
