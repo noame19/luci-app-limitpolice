@@ -16,6 +16,12 @@ function index()
 
     entry({"admin", "network", "limitpolice", "service"},
           call("action_service")).leaf = true
+
+    -- Single-rule edit page (extedit target).
+    -- %s is the section id (e.g. @rule[0]) from the URL.
+    entry({"admin", "network", "limitpolice", "edit", "%s"},
+          cbi("limitpolice_edit"),
+          _("Edit rule"), nil).leaf = true
 end
 
 -- Handle GET ?pick=IP|MAC&section=@rule[N]&target_type=ip|mac
