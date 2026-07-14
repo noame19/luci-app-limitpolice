@@ -105,5 +105,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-limitpolice-${{ matrix.name }}
-          path: sdk/bin/packages/${{ matrix.packages_dir }}/luci-app-limitpolice*.ipk
+          # ipk lands in <arch>/base/ (not directly <arch>/) per OpenWrt
+          # buildroot convention. Use ** to be robust if the category
+          # changes in future SDK releases.
+          path: sdk/bin/packages/${{ matrix.packages_dir }}/**/luci-app-limitpolice*.ipk
           if-no-files-found: error
