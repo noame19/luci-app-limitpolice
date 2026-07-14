@@ -16,7 +16,8 @@
 
 START=90
 STOP=10
-USE_PROCD=0
+USE_PROCD=1     # procd runs the script as a managed service so we can
+                # register a UCI reload trigger below.
 
 LOG_PREFIX="limitpolice"
 PRIO_BASE=100   # filter priority base; our rules live in 100..199
@@ -155,6 +156,15 @@ clear_all_rules() {
     [ -f "$STATE_FILE" ] && cut -d' ' -f1 "$STATE_FILE" 2>/dev/null | sort -u | while read -r iface; do
         [ -n "$iface" ] && clear_filters_on_iface "$iface"
     done
+}
+
+# Tell procd to watch /etc/config/limitpolice for changes. On any
+# modification (LuCI Save & Apply, `uci set` from SSH, manual `vi`, …)
+# procd will invoke reload_service() which re-syncs UCI → tc.
+# This is the entire "react to config changes" mechanism — no daemon
+# is spawned for this app itself.
+service_triggers() {
+    procd_add_reload_trigger "limitpolice"
 }
 
 start_service() {
