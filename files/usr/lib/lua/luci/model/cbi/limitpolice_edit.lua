@@ -60,6 +60,12 @@ local r_dir = s:option(ListValue, "direction", translate("Direction"))
 r_dir:value("dst", translate("Downlink (to this device)"))
 r_dir:value("src", translate("Uplink (from this device)"))
 r_dir.default = "dst"
+r_dir.description = translate(
+    "<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+    .. "(e.g. <code>wan</code>, <code>pppoe-wan</code>, <code>eth1</code>).<br/>"
+    .. "<b>src</b> caps packets <em>from</em> the device → pair with a LAN-side iface "
+    .. "(e.g. <code>br-lan</code>, <code>eth0</code>).<br/>"
+    .. "Wrong pairing = rule matches zero packets = silently wasted slot.")
 
 local r_rate = s:option(Value, "rate", translate("Rate"))
 r_rate.rmempty = false

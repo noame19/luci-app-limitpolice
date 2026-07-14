@@ -6,13 +6,20 @@
 # Rule schema (UCI):
 #   config rule
 #       option enabled  '1'
-#       option interface 'br-lan'             # iface name (br-lan, eth0, ...)
+#       option interface 'br-lan'             # WAN iface for dst, LAN iface for src
 #       option target   '192.168.1.100/32'   # CIDR or single IP or MAC (xx:xx:xx:xx:xx:xx)
 #       option target_type 'ip'              # ip | mac
-#       option direction 'dst'               # dst (downlink to device) | src (uplink from device)
+#       option direction 'dst'               # dst (downlink) | src (uplink)
 #       option rate '10'                     # numeric
 #       option unit  'Mbps'                  # Kbps | Mbps | KB/s | MB/s
 #       option comment 'iphone'              # free text
+#
+# Direction/iface pairing (validated by apply_rule, mismatched combos
+# log a warning and are skipped):
+#   dst (downlink)  → iface MUST be a WAN-side iface (where packets
+#                     from the internet first hit ingress)
+#   src (uplink)    → iface MUST be a LAN-side iface (where packets
+#                     from the device first hit ingress)
 
 START=90
 STOP=10
@@ -31,12 +38,40 @@ STATS_PRIO_MAX=9999
 STATE_FILE="/var/run/limitpolice.filters"
 QDISC_STATE_FILE="/var/run/limitpolice.qdiscs"
 STATS_STATE_FILE="/var/run/limitpolice.stats"
+# Mutual exclusion between init.d's tc add/del and quota-check's tc add/del.
+# rtnetlink is a kernel-internal lock; concurrent tc users serialize on
+# it, and `RTNETLINK answers: File exists` is the visible symptom on
+# weak CPUs. Quota-check and stats-backup already flock this file;
+# init.d does the same so reload+daemon can never race.
+LOCK_FILE="/var/run/limitpolice/.lock"
 
 . /etc/functions.sh
 
 log_msg() {
     local level="$1"; shift
     logger -t "$LOG_PREFIX" -p "daemon.$level" "$*"
+}
+
+# Classify an iface name into "wan" | "lan" | "unknown" by:
+#   1. If it's the current IPv4 default route's interface → WAN.
+#   2. Heuristic by name (handles common OpenWrt naming conventions).
+# The result is used to validate that the user picked a sensible
+# iface/direction combo in their rule (see apply_rule).
+iface_role() {
+    local iface="$1"
+    local def
+    def=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
+    if [ -n "$def" ] && [ "$iface" = "$def" ]; then
+        echo wan; return
+    fi
+    case "$iface" in
+        br-lan|br-guest|br-*|lan|lan[0-9]|lan_*|wlan*|ath*|rai*)
+            echo lan ;;
+        wan|wan6|wan[0-9]|wan_*|wwan*|pppoe-wan*|usb*|wwan0)
+            echo wan ;;
+        *)
+            echo unknown ;;
+    esac
 }
 
 # load kernel modules required by tc police
@@ -221,9 +256,20 @@ start_service() {
     # service is disabled in UCI we still need the daemon up so quota
     # stats continue to be collected (it's a pure reporting feature).
     if [ "$main_enabled" = "1" ]; then
+        # Acquire exclusive flock for the tc-touching phase. Release
+        # before procd_open_instance so the daemon (when its quota-check
+        # wakes up) can take the same lock without deadlocking.
+        exec 8>"$LOCK_FILE" 2>/dev/null
+        flock -x -w 10 8 || {
+            log_msg err "cannot acquire $LOCK_FILE — quota-check still running?"
+            exec 8>&- 2>/dev/null
+            return 1
+        }
         local prio=$PRIO_BASE
         local iface_seen=""
         config_foreach apply_rule rule prio
+        flock -u 8 2>/dev/null
+        exec 8>&- 2>/dev/null
     fi
 
     # Pull the unique daemon process up. It runs `while true; sleep 10`,
@@ -240,7 +286,7 @@ start_service() {
 
 apply_rule() {
     local rule_name="$1" var_prio="$2"
-    local iface target enabled
+    local iface target enabled direction role
     config_get_bool enabled "$rule_name" enabled 1
     [ "$enabled" = "1" ] || return 0
     config_get iface "$rule_name" interface ""
@@ -248,6 +294,22 @@ apply_rule() {
         log_msg warn "rule $rule_name has no interface, skipping"
         return 0
     }
+    config_get direction "$rule_name" direction "dst"
+
+    # Validate iface/direction pairing. An ingress qdisc on iface X sees
+    # packets ENTERING X — so for downlink (dst) we want the WAN iface
+    # (where packets from the internet first arrive); for uplink (src)
+    # we want the LAN bridge. The wrong combo would match zero packets
+    # and silently waste the rule's prio slot.
+    role=$(iface_role "$iface")
+    case "${direction}-${role}" in
+        dst-wan|src-lan) : ;;                       # canonical pair
+        dst-unknown|src-unknown) ;;                 # accept but stay quiet
+        *)
+            log_msg warn "rule $rule_name: iface=$iface (role=$role) with direction=$direction — likely ineffective. dst wants WAN, src wants LAN. Skipping."
+            return 0
+            ;;
+    esac
 
     ensure_ingress_qdisc "$iface" || return 0
 
@@ -272,6 +334,13 @@ apply_rule() {
 }
 
 stop_service() {
+    # Acquire flock so we never race quota-check's stats filter rebuild.
+    exec 8>"$LOCK_FILE" 2>/dev/null
+    flock -x -w 10 8 || {
+        log_msg err "cannot acquire $LOCK_FILE — quota-check still running?"
+        exec 8>&- 2>/dev/null
+        return 1
+    }
     # Snapshot stats before wiping — this is the active-reboot safety net.
     backup_stats_now
     clear_all_rules
@@ -285,6 +354,8 @@ stop_service() {
     # also clear the daily/weekly/monthly stats files — they're in /tmp so
     # reboot already wipes them, but a clean stop should leave nothing.
     rm -rf /tmp/limitpolice/stats
+    flock -u 8 2>/dev/null
+    exec 8>&- 2>/dev/null
 }
 
 reload_service() {
