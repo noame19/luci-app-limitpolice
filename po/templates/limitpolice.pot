@@ -1,0 +1,320 @@
+# LuCI translation template — luci-app-limitpolice
+# Copyright (C) 2026 luci-app-limitpolice contributors
+# This file is distributed under the same license as the luci-app-limitpolice package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-limitpolice 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-15 00:00+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: files/usr/lib/lua/luci/controller/limitpolice.lua:12
+msgid "Limit Police"
+msgstr ""
+
+#: files/usr/lib/lua/luci/controller/limitpolice.lua:24
+msgid "Edit rule"
+msgstr ""
+
+#: files/usr/lib/lua/luci/controller/limitpolice.lua:32
+msgid "Traffic Report"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:53
+msgid ""
+"Per-device bandwidth policing using <code>tc ingress police</code>. Stays "
+"compatible with hardware Flow Offloading, fullcon NAT, and BBR. No IFB, no "
+"HTB, no fq_codel, no Cake."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:60
+msgid "Service"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:63
+msgid "Enable service"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:66
+msgid ""
+"When enabled, rules below are pushed via <code>/etc/init.d/limitpolice</code>."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:69
+msgid "Stats / quota poll interval (seconds)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:73
+msgid ""
+"How often the daemon runs <code>limitpolice-quota-check</code>. Minimum 10s. "
+"5 minutes (300) is the safe default on weak CPUs."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:76
+msgid "Stats archive interval (seconds)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:80
+msgid ""
+"How often the daemon runs <code>limitpolice-stats-backup</code> (single "
+"tar.gz write to <code>/etc/limitpolice/</code>). Minimum 60s. 1 hour (3600) "
+"is the safe default — protects against active reboot only; power loss can "
+"lose up to one interval."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:85
+msgid "Quota throttle rate (kbit)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:89
+msgid ""
+"Rate the offending filter is dropped to when a device's daily quota is "
+"exceeded. <code>1</code> = hard wall (default). Raise to <code>16</code> or "
+"<code>64</code> to keep basic IM text flowing."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:94
+msgid "Service control"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:114
+msgid "Current status"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:124
+msgid "Per-device rules"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:130
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:25
+msgid "Enable"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:134
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:29
+msgid "Interface"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:141
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:49
+msgid "Match by"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:146
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:54
+msgid "Target"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:149
+msgid "Either type a value above, or click a chip below."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:151
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:59
+msgid "Direction"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:152
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:60
+msgid "Downlink (to this device)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:153
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:61
+msgid "Uplink (from this device)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:155
+msgid ""
+"<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+"(where packets from the internet first arrive, e.g. <code>wan</code>, "
+"<code>pppoe-wan</code>, <code>eth1</code>).<br/><b>src</b> caps packets "
+"<em>from</em> the device → pair with a LAN-side iface (where packets from "
+"the device first arrive, e.g. <code>br-lan</code>, <code>eth0</code>).<br/"
+">Wrong pairing = rule matches zero packets = silently wasted slot."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:164
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:70
+msgid "Rate"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:170
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:76
+msgid "Unit"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:171
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:77
+msgid "Kbps (kilobits per second)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:172
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:78
+msgid "Mbps (megabits per second)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:173
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:79
+msgid "KB/s (kilobytes per second)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:174
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:80
+msgid "MB/s (megabytes per second)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:177
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:83
+msgid "Daily quota (0 = off)"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:181
+msgid ""
+"When exceeded, this device's filter is dropped to <code>1 kbit</code> as a "
+"punitive block until the next 00:00 reset. Counters are derived from "
+"<code>tc -s filter show</code> bytes, so the value reflects the actual "
+"ingress bytes seen on this iface, not the post-NAT traffic. No daemon — a "
+"cron job runs the check every 5 min."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:187
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:91
+msgid "Quota unit"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:194
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:98
+msgid "Note"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:199
+msgid "Pick from DHCP"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice.lua:203
+msgid "No DHCP leases found at /tmp/dhcp.leases."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:10
+msgid ""
+"Edit a single per-device bandwidth rule. Save & Apply will restart the init "
+"script."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:20
+msgid "Rule"
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:57
+msgid "Either an IPv4/CIDR or a colon-separated MAC."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:63
+msgid ""
+"<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+"(e.g. <code>wan</code>, <code>pppoe-wan</code>, <code>eth1</code>).<br/"
+"><b>src</b> caps packets <em>from</em> the device → pair with a LAN-side "
+"iface (e.g. <code>br-lan</code>, <code>eth0</code>).<br/>Wrong pairing = "
+"rule matches zero packets = silently wasted slot."
+msgstr ""
+
+#: files/usr/lib/lua/luci/model/cbi/limitpolice_edit.lua:87
+msgid ""
+"When exceeded, this device's filter is dropped to the throttle rate "
+"configured in the main section until the next 00:00 reset. Counted from "
+"<code>tc -s filter show</code> bytes."
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:9
+msgid "Traffic Report"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:32
+msgid "Per-device daily / weekly / monthly traffic derived from"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:34
+msgid ""
+"counters maintained by a cron job. Counts reset on reboot (no flash "
+"writes). Open the main"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:37
+msgid "page to add rate-limit or daily-quota rules."
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:42
+msgid ""
+"No stats yet. The cron job runs every 5 minutes — check back after a few "
+"cycles. You can verify with:"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:50
+msgid "Device"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:51
+msgid "MAC / IP"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:52
+msgid "Today ↓"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:53
+msgid "Today ↑"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:54
+msgid "Week ↓"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:55
+msgid "Week ↑"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:56
+msgid "Month ↓"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:57
+msgid "Month ↑"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:58
+msgid "Last seen"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:59
+msgid "Quick config"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:79
+msgid "Add a real-time rate limit for this device"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:80
+msgid "Limit"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:83
+msgid "Add a daily quota for this device"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:84
+msgid "Quota"
+msgstr ""
+
+#: files/usr/lib/lua/luci/view/limitpolice_stats.htm:93
+msgid ""
+"Unknown devices (greyed) have no DHCP lease — usually static-IP hosts or "
+"devices that have not yet completed DHCP. Use the IP-based quick-config "
+"button to add a rule manually."
+msgstr ""

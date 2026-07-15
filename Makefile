@@ -2,13 +2,19 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-limitpolice
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=luci-app-limitpolice contributors
 
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
+
+# Languages for which po/<lang>/limitpolice.po will be compiled into
+# /usr/lib/lua/luci/i18n/limitpolice.<lang>.lua by OpenWrt's i18n
+# build hook (po2lua). The browser picks the best match from
+# Accept-Language; if no match, msgid itself is shown.
+PKG_LANGUAGES:=zh-cn en
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -32,10 +38,11 @@ define Package/luci-app-limitpolice/description
 
 	Three features in one tiny package:
 	  1. Real-time per-device rate limit (IP or MAC, downlink / uplink)
-	  2. Per-device daily traffic quota with punitive 1 kbit block on
-	     overflow (auto-lifted at 00:00 by service restart)
+	  2. Per-device daily traffic quota with punitive throttle (UCI
+	     tunable rate, default 1 kbit hard wall) on overflow, auto-lifted
+	     at 00:00 by the daemon's day-rollover detection
 	  3. Read-only daily / weekly / monthly traffic report tab — backed
-	     by cron-driven per-IP counter filters, no background daemon
+	     by the limitpoliced daemon, no cron jobs
 endef
 
 define Build/Prepare

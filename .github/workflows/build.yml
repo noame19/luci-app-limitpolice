@@ -37,6 +37,10 @@ jobs:
             sdk: https://downloads.openwrt.org/releases/24.10.7/targets/ramips/mt7621/openwrt-sdk-24.10.7-ramips-mt7621_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: mipsel_24kc
 
+          - name: ath79
+            sdk: https://downloads.openwrt.org/releases/24.10.7/targets/ath79/generic/openwrt-sdk-24.10.7-ath79-generic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+            packages_dir: mips_24kc
+
           - name: filogic
             sdk: https://downloads.openwrt.org/releases/24.10.7/targets/mediatek/filogic/openwrt-sdk-24.10.7-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst
             packages_dir: aarch64_cortex-a53

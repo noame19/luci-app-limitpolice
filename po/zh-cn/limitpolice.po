@@ -1,0 +1,274 @@
+# Chinese (Simplified) translation for luci-app-limitpolice
+# Copyright (C) 2026 luci-app-limitpolice contributors
+# This file is distributed under the same license as the luci-app-limitpolice package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-limitpolice 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-15 00:00+0800\n"
+"PO-Revision-Date: 2026-07-15 00:00+0800\n"
+"Last-Translator: luci-app-limitpolice contributors\n"
+"Language-Team: Chinese (Simplified)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_CN\n"
+
+msgid "Limit Police"
+msgstr "限速管控"
+
+msgid "Edit rule"
+msgstr "编辑规则"
+
+msgid "Traffic Report"
+msgstr "流量统计"
+
+msgid ""
+"Per-device bandwidth policing using <code>tc ingress police</code>. Stays "
+"compatible with hardware Flow Offloading, fullcon NAT, and BBR. No IFB, no "
+"HTB, no fq_codel, no Cake."
+msgstr ""
+"用 <code>tc ingress police</code>（TC 入向流量管制）对每台设备做带宽限速。"
+"兼容硬件 Flow Offloading、fullcon NAT、BBR；不依赖 IFB / HTB / fq_codel / "
+"Cake。"
+
+msgid "Service"
+msgstr "服务"
+
+msgid "Enable service"
+msgstr "启用服务"
+
+msgid ""
+"When enabled, rules below are pushed via <code>/etc/init.d/limitpolice</code>."
+msgstr ""
+"启用后，下方规则会通过 <code>/etc/init.d/limitpolice</code> 下发到内核。"
+
+msgid "Stats / quota poll interval (seconds)"
+msgstr "流量统计 / 配额轮询间隔（秒）"
+
+msgid ""
+"How often the daemon runs <code>limitpolice-quota-check</code>. Minimum 10s. "
+"5 minutes (300) is the safe default on weak CPUs."
+msgstr ""
+"守护进程跑 <code>limitpolice-quota-check</code> 的频率。最短 10 秒。"
+"弱 CPU 推荐 5 分钟（300）。"
+
+msgid "Stats archive interval (seconds)"
+msgstr "流量统计归档间隔（秒）"
+
+msgid ""
+"How often the daemon runs <code>limitpolice-stats-backup</code> (single "
+"tar.gz write to <code>/etc/limitpolice/</code>). Minimum 60s. 1 hour (3600) "
+"is the safe default — protects against active reboot only; power loss can "
+"lose up to one interval."
+msgstr ""
+"守护进程跑 <code>limitpolice-stats-backup</code> 的频率（往 <code>/etc/"
+"limitpolice/</code> 写一次 tar.gz）。最短 60 秒。1 小时（3600）只防主动"
+"重启，掉电会丢一个间隔的数据。"
+
+msgid "Quota throttle rate (kbit)"
+msgstr "配额惩罚速率（kbit）"
+
+msgid ""
+"Rate the offending filter is dropped to when a device's daily quota is "
+"exceeded. <code>1</code> = hard wall (default). Raise to <code>16</code> or "
+"<code>64</code> to keep basic IM text flowing."
+msgstr ""
+"设备超额后，规则会被降到该速率。<code>1</code> = 完全断网（默认）。调到 "
+"<code>16</code> 或 <code>64</code> 可保留 IM 文字收发。"
+
+msgid "Service control"
+msgstr "服务控制"
+
+msgid "Current status"
+msgstr "当前状态"
+
+msgid "Per-device rules"
+msgstr "按设备的规则"
+
+msgid "Enable"
+msgstr "启用"
+
+msgid "Interface"
+msgstr "网络接口"
+
+msgid "Match by"
+msgstr "匹配方式"
+
+msgid "Target"
+msgstr "目标"
+
+msgid "Either type a value above, or click a chip below."
+msgstr "在上方输入值，或点下方 DHCP 列表中的设备。"
+
+msgid "Direction"
+msgstr "方向"
+
+msgid "Downlink (to this device)"
+msgstr "下行（到本设备）"
+
+msgid "Uplink (from this device)"
+msgstr "上行（来自本设备）"
+
+msgid ""
+"<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+"(where packets from the internet first arrive, e.g. <code>wan</code>, "
+"<code>pppoe-wan</code>, <code>eth1</code>).<br/><b>src</b> caps packets "
+"<em>from</em> the device → pair with a LAN-side iface (where packets from "
+"the device first arrive, e.g. <code>br-lan</code>, <code>eth0</code>).<br/"
+">Wrong pairing = rule matches zero packets = silently wasted slot."
+msgstr ""
+"<b>dst</b>（下行）限制到本设备的流量 → 必须配 WAN 侧接口（即互联网流量"
+"最先到达的接口，例如 <code>wan</code>、<code>pppoe-wan</code>、"
+"<code>eth1</code>）。<br/><b>src</b>（上行）限制本设备发出的流量 → 必须"
+"配 LAN 侧接口（即设备流量最先到达的接口，例如 <code>br-lan</code>、"
+"<code>eth0</code>）。<br/>方向和接口配错 = 规则匹配零个包 = 静默"
+"浪费一条规则。"
+
+msgid "Rate"
+msgstr "速率"
+
+msgid "Unit"
+msgstr "单位"
+
+msgid "Kbps (kilobits per second)"
+msgstr "Kbps（千比特/秒）"
+
+msgid "Mbps (megabits per second)"
+msgstr "Mbps（兆比特/秒）"
+
+msgid "KB/s (kilobytes per second)"
+msgstr "KB/s（千字节/秒）"
+
+msgid "MB/s (megabytes per second)"
+msgstr "MB/s（兆字节/秒）"
+
+msgid "Daily quota (0 = off)"
+msgstr "每日配额（0 = 关闭）"
+
+msgid ""
+"When exceeded, this device's filter is dropped to <code>1 kbit</code> as a "
+"punitive block until the next 00:00 reset. Counters are derived from "
+"<code>tc -s filter show</code> bytes, so the value reflects the actual "
+"ingress bytes seen on this iface, not the post-NAT traffic. No daemon — a "
+"cron job runs the check every 5 min."
+msgstr ""
+"设备用满配额后，规则会被压到 <code>1 kbit</code> 作为惩罚，次日 00:00 自动"
+"恢复。计数器来自 <code>tc -s filter show</code> 的字节数，反映接口上"
+"实际见到的入向字节（NAT 之前），不是 NAT 之后的流量。守护进程每 "
+"<code>stats_interval</code> 秒检查一次（默认 300 秒，即 5 分钟）。"
+
+msgid "Quota unit"
+msgstr "配额单位"
+
+msgid "Note"
+msgstr "备注"
+
+msgid "Pick from DHCP"
+msgstr "从 DHCP 选"
+
+msgid "No DHCP leases found at /tmp/dhcp.leases."
+msgstr "在 /tmp/dhcp.leases 找不到 DHCP 租约。"
+
+msgid ""
+"Edit a single per-device bandwidth rule. Save & Apply will restart the init "
+"script."
+msgstr "编辑单条按设备的限速规则。保存并应用会重启 init 脚本。"
+
+msgid "Rule"
+msgstr "规则"
+
+msgid "Either an IPv4/CIDR or a colon-separated MAC."
+msgstr "输入 IPv4 / CIDR（如 192.168.1.100/32）或冒号分隔的 MAC 地址。"
+
+msgid ""
+"<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+"(e.g. <code>wan</code>, <code>pppoe-wan</code>, <code>eth1</code>).<br/"
+"><b>src</b> caps packets <em>from</em> the device → pair with a LAN-side "
+"iface (e.g. <code>br-lan</code>, <code>eth0</code>).<br/>Wrong pairing = "
+"rule matches zero packets = silently wasted slot."
+msgstr ""
+"<b>dst</b>（下行）限制到本设备的流量 → 必须配 WAN 侧接口（如 "
+"<code>wan</code>、<code>pppoe-wan</code>、<code>eth1</code>）。<br/"
+"><b>src</b>（上行）限制本设备发出的流量 → 必须配 LAN 侧接口（如 "
+"<code>br-lan</code>、<code>eth0</code>）。<br/>方向和接口配错 = 规则"
+"匹配零个包 = 静默浪费一条规则。"
+
+msgid ""
+"When exceeded, this device's filter is dropped to the throttle rate "
+"configured in the main section until the next 00:00 reset. Counted from "
+"<code>tc -s filter show</code> bytes."
+msgstr ""
+"设备用满配额后，规则会被压到主配置中的"惩罚速率"，次日 00:00 自动恢复。"
+"计数器来自 <code>tc -s filter show</code> 的字节数。"
+
+msgid "Per-device daily / weekly / monthly traffic derived from"
+msgstr "每台设备的日 / 周 / 月流量，来自"
+
+msgid ""
+"counters maintained by a cron job. Counts reset on reboot (no flash "
+"writes). Open the main"
+msgstr ""
+"计数器由守护进程维护。计数器随重启清零（不写 flash，保护 UBIFS）。"
+"打开主"
+
+msgid "page to add rate-limit or daily-quota rules."
+msgstr "页面可加限速或配额规则。"
+
+msgid ""
+"No stats yet. The cron job runs every 5 minutes — check back after a few "
+"cycles. You can verify with:"
+msgstr ""
+"暂无统计数据。守护进程每 <code>stats_interval</code> 秒跑一次（默认 300 秒）"
+"，稍等几个周期后再来刷新。可用以下命令验证："
+
+msgid "Device"
+msgstr "设备"
+
+msgid "MAC / IP"
+msgstr "MAC / IP"
+
+msgid "Today ↓"
+msgstr "今日 ↓"
+
+msgid "Today ↑"
+msgstr "今日 ↑"
+
+msgid "Week ↓"
+msgstr "本周 ↓"
+
+msgid "Week ↑"
+msgstr "本周 ↑"
+
+msgid "Month ↓"
+msgstr "本月 ↓"
+
+msgid "Month ↑"
+msgstr "本月 ↑"
+
+msgid "Last seen"
+msgstr "最后活跃"
+
+msgid "Quick config"
+msgstr "快捷配置"
+
+msgid "Add a real-time rate limit for this device"
+msgstr "给该设备加一条实时限速规则"
+
+msgid "Limit"
+msgstr "限速"
+
+msgid "Add a daily quota for this device"
+msgstr "给该设备加一条每日配额"
+
+msgid "Quota"
+msgstr "配额"
+
+msgid ""
+"Unknown devices (greyed) have no DHCP lease — usually static-IP hosts or "
+"devices that have not yet completed DHCP. Use the IP-based quick-config "
+"button to add a rule manually."
+msgstr ""
+"未知设备（灰色行）没有 DHCP 租约 — 通常是静态 IP 主机，或尚未完成 DHCP "
+"的设备。用基于 IP 的"快捷配置"按钮手动加规则。"

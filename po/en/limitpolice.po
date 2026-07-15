@@ -1,0 +1,240 @@
+# English (fallback) translation for luci-app-limitpolice
+# msgstr intentionally left empty so LuCI falls back to the English msgid.
+# This file exists so the build system picks up English as a known locale.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-limitpolice 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-15 00:00+0800\n"
+"PO-Revision-Date: 2026-07-15 00:00+0800\n"
+"Last-Translator: luci-app-limitpolice contributors\n"
+"Language-Team: English\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+
+msgid "Limit Police"
+msgstr ""
+
+msgid "Edit rule"
+msgstr ""
+
+msgid "Traffic Report"
+msgstr ""
+
+msgid ""
+"Per-device bandwidth policing using <code>tc ingress police</code>. Stays "
+"compatible with hardware Flow Offloading, fullcon NAT, and BBR. No IFB, no "
+"HTB, no fq_codel, no Cake."
+msgstr ""
+
+msgid "Service"
+msgstr ""
+
+msgid "Enable service"
+msgstr ""
+
+msgid ""
+"When enabled, rules below are pushed via <code>/etc/init.d/limitpolice</code>."
+msgstr ""
+
+msgid "Stats / quota poll interval (seconds)"
+msgstr ""
+
+msgid ""
+"How often the daemon runs <code>limitpolice-quota-check</code>. Minimum 10s. "
+"5 minutes (300) is the safe default on weak CPUs."
+msgstr ""
+
+msgid "Stats archive interval (seconds)"
+msgstr ""
+
+msgid ""
+"How often the daemon runs <code>limitpolice-stats-backup</code> (single "
+"tar.gz write to <code>/etc/limitpolice/</code>). Minimum 60s. 1 hour (3600) "
+"is the safe default — protects against active reboot only; power loss can "
+"lose up to one interval."
+msgstr ""
+
+msgid "Quota throttle rate (kbit)"
+msgstr ""
+
+msgid ""
+"Rate the offending filter is dropped to when a device's daily quota is "
+"exceeded. <code>1</code> = hard wall (default). Raise to <code>16</code> or "
+"<code>64</code> to keep basic IM text flowing."
+msgstr ""
+
+msgid "Service control"
+msgstr ""
+
+msgid "Current status"
+msgstr ""
+
+msgid "Per-device rules"
+msgstr ""
+
+msgid "Enable"
+msgstr ""
+
+msgid "Interface"
+msgstr ""
+
+msgid "Match by"
+msgstr ""
+
+msgid "Target"
+msgstr ""
+
+msgid "Either type a value above, or click a chip below."
+msgstr ""
+
+msgid "Direction"
+msgstr ""
+
+msgid "Downlink (to this device)"
+msgstr ""
+
+msgid "Uplink (from this device)"
+msgstr ""
+
+msgid ""
+"<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+"(where packets from the internet first arrive, e.g. <code>wan</code>, "
+"<code>pppoe-wan</code>, <code>eth1</code>).<br/><b>src</b> caps packets "
+"<em>from</em> the device → pair with a LAN-side iface (where packets from "
+"the device first arrive, e.g. <code>br-lan</code>, <code>eth0</code>).<br/"
+">Wrong pairing = rule matches zero packets = silently wasted slot."
+msgstr ""
+
+msgid "Rate"
+msgstr ""
+
+msgid "Unit"
+msgstr ""
+
+msgid "Kbps (kilobits per second)"
+msgstr ""
+
+msgid "Mbps (megabits per second)"
+msgstr ""
+
+msgid "KB/s (kilobytes per second)"
+msgstr ""
+
+msgid "MB/s (megabytes per second)"
+msgstr ""
+
+msgid "Daily quota (0 = off)"
+msgstr ""
+
+msgid ""
+"When exceeded, this device's filter is dropped to <code>1 kbit</code> as a "
+"punitive block until the next 00:00 reset. Counters are derived from "
+"<code>tc -s filter show</code> bytes, so the value reflects the actual "
+"ingress bytes seen on this iface, not the post-NAT traffic. No daemon — a "
+"cron job runs the check every 5 min."
+msgstr ""
+
+msgid "Quota unit"
+msgstr ""
+
+msgid "Note"
+msgstr ""
+
+msgid "Pick from DHCP"
+msgstr ""
+
+msgid "No DHCP leases found at /tmp/dhcp.leases."
+msgstr ""
+
+msgid ""
+"Edit a single per-device bandwidth rule. Save & Apply will restart the init "
+"script."
+msgstr ""
+
+msgid "Rule"
+msgstr ""
+
+msgid "Either an IPv4/CIDR or a colon-separated MAC."
+msgstr ""
+
+msgid ""
+"<b>dst</b> caps packets <em>to</em> the device → pair with a WAN-side iface "
+"(e.g. <code>wan</code>, <code>pppoe-wan</code>, <code>eth1</code>).<br/"
+"><b>src</b> caps packets <em>from</em> the device → pair with a LAN-side "
+"iface (e.g. <code>br-lan</code>, <code>eth0</code>).<br/>Wrong pairing = "
+"rule matches zero packets = silently wasted slot."
+msgstr ""
+
+msgid ""
+"When exceeded, this device's filter is dropped to the throttle rate "
+"configured in the main section until the next 00:00 reset. Counted from "
+"<code>tc -s filter show</code> bytes."
+msgstr ""
+
+msgid "Per-device daily / weekly / monthly traffic derived from"
+msgstr ""
+
+msgid ""
+"counters maintained by a cron job. Counts reset on reboot (no flash "
+"writes). Open the main"
+msgstr ""
+
+msgid "page to add rate-limit or daily-quota rules."
+msgstr ""
+
+msgid ""
+"No stats yet. The cron job runs every 5 minutes — check back after a few "
+"cycles. You can verify with:"
+msgstr ""
+
+msgid "Device"
+msgstr ""
+
+msgid "MAC / IP"
+msgstr ""
+
+msgid "Today ↓"
+msgstr ""
+
+msgid "Today ↑"
+msgstr ""
+
+msgid "Week ↓"
+msgstr ""
+
+msgid "Week ↑"
+msgstr ""
+
+msgid "Month ↓"
+msgstr ""
+
+msgid "Month ↑"
+msgstr ""
+
+msgid "Last seen"
+msgstr ""
+
+msgid "Quick config"
+msgstr ""
+
+msgid "Add a real-time rate limit for this device"
+msgstr ""
+
+msgid "Limit"
+msgstr ""
+
+msgid "Add a daily quota for this device"
+msgstr ""
+
+msgid "Quota"
+msgstr ""
+
+msgid ""
+"Unknown devices (greyed) have no DHCP lease — usually static-IP hosts or "
+"devices that have not yet completed DHCP. Use the IP-based quick-config "
+"button to add a rule manually."
+msgstr ""
