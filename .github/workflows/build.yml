@@ -85,7 +85,11 @@ jobs:
         working-directory: sdk
         run: |
           set -euo pipefail
-          ./scripts/feeds update -a
+          # SDK tarball ships with feeds already at v24.10.7 — skip
+          # `feeds update -a` because the feed repos are checked out as
+          # detached HEADs at the tag commit, and `./scripts/feeds update`
+          # internally runs `git pull` which fails on detached HEADs
+          # ("You are not currently on a branch.").
           ./scripts/feeds install -a
           echo "CONFIG_PACKAGE_luci-app-limitpolice=m" >> .config
           make defconfig
