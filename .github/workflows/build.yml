@@ -77,6 +77,9 @@ jobs:
           cp Makefile sdk/package/luci-app-limitpolice/Makefile
           cp LICENSE  sdk/package/luci-app-limitpolice/LICENSE
           cp -r files  sdk/package/luci-app-limitpolice/files
+          # Stage po/ so the OpenWrt i18n hook can po2lmo the .po files
+          # into /usr/lib/lua/luci/i18n/limitpolice.<lang>.lmo.
+          [ -d po ] && cp -r po sdk/package/luci-app-limitpolice/po
 
       - name: Build package
         working-directory: sdk
